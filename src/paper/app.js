@@ -11,6 +11,7 @@ const { createBroker } = require('./broker');
 const { PaperDesk } = require('./desk');
 const { makeAuth } = require('./api/auth');
 const { makeRouter } = require('./api/routes');
+const { makeAnalyzeRouter } = require('../analyze/routes');
 
 // Live data only: market data is the production tastytrade feed (or, optionally,
 // a running TradeForge's /api/options). Tests inject `clock` and `market` and pass dev: true.
@@ -44,7 +45,9 @@ function createPaperApp({ env = process.env, dataDir, clock, market, broker, log
   app.use('/api/paper', router);
   app.use('/paper/api', router);
   app.use('/paper', auth.ownerPage, express.static(path.join(__dirname, '..', '..', 'public', 'paper'), { index: 'index.html' }));
-  app.get('/', (req, res) => res.redirect('/paper/'));
+  app.use('/api/analyze', auth.ownerPage, makeAnalyzeRouter({ market }));
+  app.use('/analyze', auth.ownerPage, express.static(path.join(__dirname, '..', '..', 'public', 'analyze'), { index: 'index.html' }));
+  app.get('/', (req, res) => res.redirect('/analyze/'));
 
   // ── background loops ──
   const timers = [];

@@ -6,6 +6,10 @@ The running version is shown in the website header, in the `npm start` summary a
 
 ## [Unreleased]
 
+### Added
+- **Analyze tabs** (`/analyze/`): GEX and Chain, read-only live views built on the same tastytrade feed and `src/gex.js` math as the rest of BoldTick — no simulated or sample data. GEX shows the KPI strip (regime, gamma flip, call/put wall, max pain, expected move), a per-strike call/put GEX ladder, a signal read, pin & range, and delta/charm exposure, plus a session log built from what the page itself has observed (not invented history). Chain shows a live two-sided option chain with a strike picker and a selected-strike detail panel. Both poll the live feed every 10–15 s. New `GET /api/analyze/{quote,expirations,chain,gex}/:symbol`, owner-login only, nothing here places or touches an order.
+- `src/gex.js`: `computeGexSnapshot()` now also returns `byStrike`, the per-strike GEX profile that powers the Analyze ladder (the math already existed internally; this only exposes it).
+
 ### Fixed
 - Trade idea cards: an idea that couldn't be priced (for example, a malformed iron condor) showed max profit "open-ended" and max loss "stock risk". It now shows "—" for both; "stock risk" appears only on covered structures.
 - tastytrade error messages: a rejection's specific reason (tastytrade's nested `errors` list) was dropped, leaving only its generic wrapper message (for example "One or more preflight checks failed" with no detail). The specific reason is now included.

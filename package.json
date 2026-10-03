@@ -9,7 +9,7 @@
   },
   "scripts": {
     "start": "node server.js",
-    "test": "node --test test/tastytrade.test.js test/paper.test.js",
+    "test": "node --test test/tastytrade.test.js test/paper.test.js test/analyze.test.js",
     "release": "node scripts/release.js",
     "tt:smoke": "node scripts/tt-smoke.js",
     "paper:muse-sim": "node scripts/muse-sim.js",

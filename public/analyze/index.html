@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BoldTick · GEX</title>
+<link rel="stylesheet" href="analyze.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><div class="mark"></div><span class="name">BoldTick</span></div>
+  <nav class="sections" aria-label="Sections">
+    <a href="/analyze/" class="active">Analyze</a>
+    <span class="disabled" title="Not built yet">Build</span>
+    <a href="/paper/">Execute</a>
+    <span class="disabled" title="Not built yet">Monitor</span>
+  </nav>
+  <div class="spacer"></div>
+  <div class="status-cluster">
+    <span id="dataStatus"><span class="dot" id="dataDot"></span><span id="dataLabel">tastytrade</span></span>
+    <span class="mono" id="clock"></span>
+  </div>
+</header>
+
+<div class="tabs">
+  <a href="/analyze/" class="active">GEX</a>
+  <a href="/analyze/chain.html">Chain</a>
+  <span class="disabled">Algo</span>
+  <span class="disabled">Covered calls</span>
+  <span class="disabled">Journal</span>
+</div>
+
+<main>
+  <div class="controls">
+    <div style="display:flex; gap:8px">
+      <label class="field">Symbol<input id="symbol" aria-label="Symbol" autocomplete="off"></label>
+      <label class="field">Expiry<select id="expiry" aria-label="Expiry"></select></label>
+    </div>
+    <div class="price">
+      <span class="last mono" id="priceLast">—</span>
+      <span class="chg mono" id="priceChg">—</span>
+    </div>
+    <div class="spacer"></div>
+    <span class="pillinfo" id="updated">—</span>
+  </div>
+
+  <div id="errBox"></div>
+
+  <div class="kpis" id="kpis"></div>
+
+  <div class="layout">
+    <section class="panel" aria-label="Gamma exposure by strike" style="flex: 2 1 560px; min-width: 0">
+      <div class="panel-head">
+        <h2>Gamma exposure by strike</h2>
+        <span class="note">$M per 1% move</span>
+        <div class="spacer"></div>
+        <span class="legend-item"><span class="swatch" style="background:var(--call)"></span>Call GEX</span>
+        <span class="legend-item"><span class="swatch" style="background:var(--put)"></span>Put GEX</span>
+      </div>
+      <div id="ladder" style="display:flex; flex-direction:column; gap:3px"></div>
+    </section>
+
+    <aside class="panel-col">
+      <section aria-label="Signal read">
+        <div class="eyebrow" style="display:flex; justify-content:space-between; align-items:center">
+          <span>Signal read</span><span class="note" id="nextPoll"></span>
+        </div>
+        <div class="mono" id="signalBias" style="font-size:30px; font-weight:600; margin:10px 0 6px"></div>
+        <p id="signalText" style="margin:0 0 10px; color: var(--muted-row); line-height:1.5"></p>
+        <div style="display:flex; gap:8px; flex-wrap:wrap" id="signalTags"></div>
+      </section>
+
+      <section aria-label="Pin and range">
+        <div class="eyebrow" style="margin-bottom:12px">Pin &amp; range</div>
+        <div id="pinRows"></div>
+      </section>
+
+      <section aria-label="Delta and charm exposure">
+        <div class="eyebrow" style="margin-bottom:12px">Delta &amp; charm</div>
+        <div id="dexRows"></div>
+      </section>
+    </aside>
+  </div>
+
+  <section class="panel" aria-label="Observed this session" style="overflow-x:auto">
+    <div class="panel-head">
+      <h2>Observed this session</h2>
+      <span class="note">logged here as each refresh comes in — not a trade signal</span>
+    </div>
+    <table class="gridtable" style="min-width:640px">
+      <thead><tr><th>Time</th><th>Regime</th><th style="text-align:right">Spot</th><th style="text-align:right">Flip</th><th style="text-align:right">Call wall</th><th style="text-align:right">Put wall</th></tr></thead>
+      <tbody id="logBody"><tr><td colspan="6" class="empty">Waiting for the first reading…</td></tr></tbody>
+    </table>
+  </section>
+</main>
+
+<script src="analyze.js"></script>
+<script>
+Analyze.initHeader();
+const { fmt, fmtM, esc, api } = Analyze;
+
+const kpisEl = document.getElementById('kpis');
+const ladderEl = document.getElementById('ladder');
+const errBox = document.getElementById('errBox');
+const updatedEl = document.getElementById('updated');
+const logBody = document.getElementById('logBody');
+const dataDot = document.getElementById('dataDot');
+const dataLabel = document.getElementById('dataLabel');
+const log = [];
+
+function kpi(label, value, sub, color) {
+  return `<div class="kpi"><span class="label">${esc(label)}</span><span class="value" style="color:${color || 'var(--text-hi)'}">${esc(value)}</span><span class="sub">${esc(sub)}</span></div>`;
+}
+
+function renderError(msg) {
+  errBox.innerHTML = msg ? `<div class="err-banner">${esc(msg)}</div>` : '';
+  dataDot.className = 'dot ' + (msg ? 'err' : 'ok');
+}
+
+function renderLadder(byStrike, spot, flip) {
+  if (!byStrike || !byStrike.length) { ladderEl.innerHTML = '<p class="empty">No open interest near the money yet.</p>'; return; }
+  const maxAbs = Math.max(1, ...byStrike.map(r => Math.max(Math.abs(r.callGEX), Math.abs(r.putGEX))));
+  const rows = [...byStrike].sort((a, b) => b.strike - a.strike);
+  const html = [];
+  let spotShown = false, flipShown = false;
+  for (const r of rows) {
+    if (!spotShown && spot != null && r.strike <= spot) { html.push(marker('SPOT ' + fmt(spot), '#F2F0EB')); spotShown = true; }
+    if (!flipShown && flip != null && r.strike <= flip) { html.push(marker('GAMMA FLIP ' + fmt(flip, 0), 'var(--accent)')); flipShown = true; }
+    const callPct = Math.max(1, Math.round(Math.abs(r.callGEX) / maxAbs * 100));
+    const putPct = Math.max(1, Math.round(Math.abs(r.putGEX) / maxAbs * 100));
+    const isNear = spot != null && Math.abs(r.strike - spot) < 1e-6;
+    html.push(`<div style="display:grid; grid-template-columns: minmax(0,1fr) 84px minmax(0,1fr); align-items:center; height:22px; background:${isNear ? '#1C1D21' : 'transparent'}; border-radius:3px">
+      <div style="display:flex; justify-content:flex-end; align-items:center; gap:8px; padding-right:4px">
+        <span class="mono" style="font-size:11px; color:var(--text-faint)">${Math.abs(r.callGEX) >= 10e6 ? fmtM(r.callGEX) : ''}</span>
+        <div style="width:${callPct}%; height:14px; background:var(--call); border-radius:2px 0 0 2px"></div>
+      </div>
+      <span class="mono" style="text-align:center; font-size:12px; color:var(--muted-row)">${fmt(r.strike, 0)}</span>
+      <div style="display:flex; align-items:center; gap:8px; padding-left:4px">
+        <div style="width:${putPct}%; height:14px; background:var(--put); border-radius:0 2px 2px 0"></div>
+        <span class="mono" style="font-size:11px; color:var(--text-faint)">${Math.abs(r.putGEX) >= 10e6 ? fmtM(r.putGEX) : ''}</span>
+      </div>
+    </div>`);
+  }
+  ladderEl.innerHTML = html.join('');
+  function marker(label, color) {
+    return `<div style="display:flex; align-items:center; gap:10px; height:18px">
+      <div style="flex-grow:1; border-top:1px dashed ${color}"></div>
+      <span class="mono" style="font-size:11px; font-weight:600; color:${color}">${esc(label)}</span>
+      <div style="flex-grow:1; border-top:1px dashed ${color}"></div>
+    </div>`;
+  }
+}
+
+function renderSignal(snap) {
+  const aboveFlip = snap.flip != null && snap.price > snap.flip;
+  const positive = snap.regime === 'Positive';
+  let bias = 'NEUTRAL', color = 'var(--muted-row)';
+  if (positive && aboveFlip) { bias = 'LONG bias'; color = 'var(--good)'; }
+  else if (positive && !aboveFlip) { bias = 'SHORT bias'; color = 'var(--put)'; }
+  else if (!positive) { bias = 'VOLATILE'; color = 'var(--bad)'; }
+  document.getElementById('signalBias').textContent = bias;
+  document.getElementById('signalBias').style.color = color;
+  const regimeTxt = positive ? 'dealers are net long gamma and tend to dampen moves' : 'dealers are net short gamma and tend to amplify moves';
+  const flipTxt = snap.flip != null ? (aboveFlip ? `holding above the ${fmt(snap.flip, 0)} flip` : `sitting below the ${fmt(snap.flip, 0)} flip`) : 'flip not computed (no OI)';
+  document.getElementById('signalText').textContent = `${flipTxt.charAt(0).toUpperCase() + flipTxt.slice(1)} in a ${snap.regime || 'unknown'}-gamma regime — ${regimeTxt}.`;
+  const tags = [
+    snap.flip != null ? (aboveFlip ? 'Above flip' : 'Below flip') : null,
+    snap.dex ? `DEX ${snap.dex.netDEX >= 0 ? '+' : ''}${fmtM(snap.dex.netDEX)}` : null,
+    snap.charm ? (snap.charm.charmPinShift >= 0 ? 'Charm supportive' : 'Charm pulling down') : null,
+  ].filter(Boolean);
+  document.getElementById('signalTags').innerHTML = tags.map(t => `<span class="tag">${esc(t)}</span>`).join('');
+}
+
+function renderPinRows(snap) {
+  const rows = [
+    ['Gamma pin', fmt(snap.pin, 2)],
+    ['Max pain', fmt(snap.maxPain, 2)],
+    ['Expected move', '±' + fmt(snap.expectedMove, 0)],
+    ['Range (±1 EM)', snap.expectedMove != null ? `${fmt(snap.price - snap.expectedMove, 0)} – ${fmt(snap.price + snap.expectedMove, 0)}` : '—'],
+  ];
+  document.getElementById('pinRows').innerHTML = rows.map(([l, v]) => `<div class="factrow"><span>${esc(l)}</span><span class="v">${esc(v)}</span></div>`).join('');
+}
+
+function renderDexRows(snap) {
+  const d = snap.dex, c = snap.charm;
+  const rows = [
+    ['Call DEX (nearest 25)', d ? fmtM(d.callDEX) : '—'],
+    ['Put DEX (nearest 25)', d ? fmtM(d.putDEX) : '—'],
+    ['Net DEX', d ? fmtM(d.netDEX) : '—'],
+    ['Charm pin shift (today)', c ? (c.charmPinShift >= 0 ? '+' : '') + fmt(c.charmPinShift, 2) : '—'],
+  ];
+  document.getElementById('dexRows').innerHTML = rows.map(([l, v]) => `<div class="factrow"><span>${esc(l)}</span><span class="v">${esc(v)}</span></div>`).join('');
+}
+
+function pushLog(snap) {
+  const now = new Date().toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false, hour: '2-digit', minute: '2-digit' });
+  log.unshift({ time: now, regime: snap.regime, spot: snap.price, flip: snap.flip, callWall: snap.callWall, putWall: snap.putWall });
+  log.length = Math.min(log.length, 20);
+  logBody.innerHTML = log.map(l => `<tr>
+    <td class="mono" style="color:var(--text-dim)">${esc(l.time)}</td>
+    <td style="color:${l.regime === 'Positive' ? 'var(--good)' : 'var(--bad)'}">${esc(l.regime || '—')}</td>
+    <td class="mono" style="text-align:right">${fmt(l.spot)}</td>
+    <td class="mono" style="text-align:right; color:var(--text-dim)">${fmt(l.flip, 0)}</td>
+    <td class="mono" style="text-align:right; color:var(--call)">${fmt(l.callWall, 0)}</td>
+    <td class="mono" style="text-align:right; color:var(--put)">${fmt(l.putWall, 0)}</td>
+  </tr>`).join('');
+}
+
+let current = { symbol: 'SPX', expiry: null };
+let timer = null;
+
+async function refresh() {
+  if (!current.expiry) return;
+  try {
+    const [q, snap] = await Promise.all([
+      api(`/quote/${encodeURIComponent(current.symbol)}`),
+      api(`/gex/${encodeURIComponent(current.symbol)}?expiry=${encodeURIComponent(current.expiry)}`),
+    ]);
+    renderError(null);
+    document.getElementById('priceLast').textContent = fmt(q.last);
+    const chg = document.getElementById('priceChg');
+    chg.textContent = `${q.change >= 0 ? '+' : ''}${fmt(q.change)} (${q.changePct >= 0 ? '+' : ''}${fmt(q.changePct)}%)`;
+    chg.className = 'chg mono ' + (q.change >= 0 ? 'up' : 'down');
+    dataLabel.textContent = `tastytrade · ${snap.dte}DTE`;
+
+    kpisEl.innerHTML = [
+      kpi('Regime', snap.hasOI ? `${snap.regime === 'Positive' ? '+γ' : '-γ'} ${snap.regime}` : 'No OI', snap.totalGEX != null ? `net ${fmtM(snap.totalGEX)}` : '', snap.regime === 'Positive' ? 'var(--good)' : 'var(--bad)'),
+      kpi('Gamma flip', fmt(snap.flip, 0), snap.flip != null ? `${Math.abs(snap.price - snap.flip).toFixed(0)} pts from spot` : '', 'var(--accent)'),
+      kpi('Call wall', fmt(snap.callWall, 0), '', 'var(--call)'),
+      kpi('Put wall', fmt(snap.putWall, 0), '', 'var(--put)'),
+      kpi('Max pain', fmt(snap.maxPain, 0), '', 'var(--text-hi)'),
+      kpi('Expected move', '±' + fmt(snap.expectedMove, 0), snap.expectedMove != null ? `${fmt(snap.price - snap.expectedMove, 0)} – ${fmt(snap.price + snap.expectedMove, 0)}` : '', 'var(--text-hi)'),
+    ].join('');
+
+    renderLadder(snap.byStrike, snap.price, snap.flip);
+    renderSignal(snap);
+    renderPinRows(snap);
+    renderDexRows(snap);
+    pushLog(snap);
+    updatedEl.textContent = 'updated ' + new Date().toLocaleTimeString('en-US', { hour12: false });
+  } catch (e) {
+    renderError(e.message);
+  }
+}
+
+Analyze.wireControls({
+  symbolInput: document.getElementById('symbol'),
+  expirySelect: document.getElementById('expiry'),
+  onChange(symbol, expiry, err) {
+    current = { symbol, expiry };
+    if (err) { renderError(err.message); return; }
+    clearTimeout(timer);
+    refresh();
+    const loop = () => { refresh(); timer = setTimeout(loop, 15000); };
+    timer = setTimeout(loop, 15000);
+  },
+});
+</script>
+</body>
+</html>

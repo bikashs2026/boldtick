@@ -1,11 +1,11 @@
 # BoldTick
 
-BoldTick is Bikash's new trading website, built on live tastytrade market data. Its first part is **Paper Desk**:
+BoldTick is Bikash's new trading website, built on live tastytrade market data. It has two parts:
 
-- Muse (an AI trading agent) sends trade ideas and action signals to BoldTick's API.
-- Bikash approves, rejects and closes them on the website.
-- **A live-market scorecard is the source of truth.** Every order fills only when the live price reaches its limit, and positions, P&L and signals come from live prices.
-- **Every order is mirrored to a tastytrade paper (sandbox) account.** Nothing can reach a real-money account.
+- **Analyze** (`/analyze/`) — read-only live views: GEX (gamma exposure by strike, flip, walls, max pain, signal read) and Chain (live two-sided option chain). No simulated or sample data; nothing here places an order.
+- **Paper Desk** (`/paper/`) — Muse (an AI trading agent) sends trade ideas and action signals to BoldTick's API; Bikash approves, rejects and closes them on the website.
+  - **A live-market scorecard is the source of truth.** Every order fills only when the live price reaches its limit, and positions, P&L and signals come from live prices.
+  - **Every order is mirrored to a tastytrade paper (sandbox) account.** Nothing can reach a real-money account.
 
 Current release: **0.4**. See [CHANGELOG.md](CHANGELOG.md) for every release and [docs/RELEASING.md](docs/RELEASING.md) for how numbers are chosen and releases are cut.
 
@@ -14,8 +14,9 @@ Current release: **0.4**. See [CHANGELOG.md](CHANGELOG.md) for every release and
 ```powershell
 npm install
 copy .env.example .env      # then fill it in (see docs/PAPER_DESK.md, step 1)
-npm test                    # 27 offline tests
-npm start                   # http://127.0.0.1:3100/paper/
+npm test                    # offline tests
+npm start                   # http://127.0.0.1:3100/analyze/  (GEX, Chain)
+                             # http://127.0.0.1:3100/paper/    (Paper Desk)
 ```
 
 - [docs/PAPER_DESK.md](docs/PAPER_DESK.md): setup, the tastytrade paper account, what to test, connecting Muse, the API reference
@@ -29,8 +30,10 @@ npm start                   # http://127.0.0.1:3100/paper/
 | `server.js` | Entry point (port 3100) |
 | `src/tastytrade/` | Live market data: OAuth, option chains, DXLink streaming, live chain store |
 | `src/paper/` | Paper Desk: API, auth, ideas and validation, settings, action engine, scorecard and paper-account mirror, storage |
-| `src/gex.js` | GEX / DEX / charm / max-pain math (used by `tt:smoke` now, by the Analyze pages later) |
-| `public/paper/` | The website |
+| `src/gex.js` | GEX / DEX / charm / max-pain math — used by `tt:smoke`, the Analyze API, and `paper:muse-sim` |
+| `src/analyze/` | Read-only live API for the Analyze tabs (GEX, Chain) |
+| `public/analyze/` | The Analyze website (GEX, Chain) |
+| `public/paper/` | The Paper Desk website |
 | `scripts/` | `tt-smoke` (live data check), `paper-spike` (paper account check), `muse-sim` (Muse stand-in), `release` |
 | `test/` | Offline tests: a fake tastytrade API, DXLink and sandbox, plus a test-only market |
 | `data/paper/` | Records (git-ignored), with daily backups |

@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BoldTick · Chain</title>
+<link rel="stylesheet" href="analyze.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><div class="mark"></div><span class="name">BoldTick</span></div>
+  <nav class="sections" aria-label="Sections">
+    <a href="/analyze/" class="active">Analyze</a>
+    <span class="disabled" title="Not built yet">Build</span>
+    <a href="/paper/">Execute</a>
+    <span class="disabled" title="Not built yet">Monitor</span>
+  </nav>
+  <div class="spacer"></div>
+  <div class="status-cluster">
+    <span id="dataStatus"><span class="dot" id="dataDot"></span><span id="dataLabel">tastytrade</span></span>
+    <span class="mono" id="clock"></span>
+  </div>
+</header>
+
+<div class="tabs">
+  <a href="/analyze/">GEX</a>
+  <a href="/analyze/chain.html" class="active">Chain</a>
+  <span class="disabled">Algo</span>
+  <span class="disabled">Covered calls</span>
+  <span class="disabled">Journal</span>
+</div>
+
+<main>
+  <div class="controls">
+    <div style="display:flex; flex-wrap:wrap; gap:8px">
+      <label class="field">Symbol<input id="symbol" aria-label="Symbol" autocomplete="off"></label>
+      <label class="field">Expiry<select id="expiry" aria-label="Expiry"></select></label>
+      <label class="field">Strikes<select id="width" aria-label="Strike width">
+        <option value="10">±10 around spot</option>
+        <option value="25" selected>±25 around spot</option>
+        <option value="999">All listed</option>
+      </select></label>
+    </div>
+    <div class="price">
+      <span class="last mono" id="priceLast">—</span>
+      <span class="chg mono" id="priceChg">—</span>
+    </div>
+    <div class="spacer"></div>
+    <div class="status-cluster">
+      <span>ATM IV <span class="mono" id="atmIv" style="color:var(--text-hi)">—</span></span>
+      <span>Exp. move <span class="mono" id="expMove" style="color:var(--text-hi)">—</span></span>
+      <span>P/C OI <span class="mono" id="pcRatio" style="color:var(--text-hi)">—</span></span>
+    </div>
+  </div>
+
+  <div id="errBox"></div>
+
+  <div class="layout">
+    <section class="panel" aria-label="Option chain" style="flex: 3 1 760px; min-width: 0; padding: 8px 0 0; overflow-x: auto">
+      <table class="gridtable mono" style="min-width:900px; font-size:12.5px">
+        <thead>
+          <tr>
+            <th colspan="7" style="color:var(--call); font-family:'IBM Plex Sans',sans-serif; font-size:12px; letter-spacing:0.08em">CALLS</th>
+            <th></th>
+            <th colspan="7" style="color:var(--put); text-align:right; font-family:'IBM Plex Sans',sans-serif; font-size:12px; letter-spacing:0.08em">PUTS</th>
+          </tr>
+          <tr style="color:var(--text-faint); font-family:'IBM Plex Sans',sans-serif; font-size:11.5px">
+            <th style="text-align:right">OI</th><th style="text-align:right">Vol</th><th style="text-align:right">IV</th>
+            <th style="text-align:right">Γ</th><th style="text-align:right">Δ</th><th style="text-align:right">Bid</th><th style="text-align:right">Ask</th>
+            <th style="text-align:center; color:var(--muted-row)">Strike</th>
+            <th>Bid</th><th>Ask</th><th>Δ</th><th>Γ</th><th>IV</th><th>Vol</th><th>OI</th>
+          </tr>
+        </thead>
+        <tbody id="chainBody"><tr><td colspan="15" class="empty">Loading…</td></tr></tbody>
+      </table>
+      <div style="display:flex; flex-wrap:wrap; gap:16px; padding:12px 16px; font-family:'IBM Plex Sans',sans-serif; font-size:12px; color:var(--text-faint)">
+        <span>Shaded = in the money</span><span>Bars = open interest</span><span id="asOf"></span>
+      </div>
+    </section>
+
+    <aside class="panel-col">
+      <section aria-label="Selected strike">
+        <div style="display:flex; justify-content:space-between; align-items:baseline">
+          <span class="eyebrow">Selected strike</span>
+          <span class="note" id="selExpiry"></span>
+        </div>
+        <div class="mono" id="selStrike" style="font-size:34px; font-weight:600; color:var(--accent); margin:10px 0">—</div>
+        <div style="display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap:10px; margin-bottom:14px">
+          <div style="padding:12px; background:var(--raised); border-radius:8px; display:flex; flex-direction:column; gap:4px">
+            <span style="font-size:12px; color:var(--call); font-weight:600">Call</span>
+            <span class="mono" id="selCallMid" style="font-size:20px">—</span>
+            <span class="mono" id="selCallInfo" style="font-size:12px; color:var(--text-dim)">—</span>
+          </div>
+          <div style="padding:12px; background:var(--raised); border-radius:8px; display:flex; flex-direction:column; gap:4px">
+            <span style="font-size:12px; color:var(--put); font-weight:600">Put</span>
+            <span class="mono" id="selPutMid" style="font-size:20px">—</span>
+            <span class="mono" id="selPutInfo" style="font-size:12px; color:var(--text-dim)">—</span>
+          </div>
+        </div>
+        <div id="selFacts"></div>
+        <p style="font-size:12px; color:var(--text-faint); line-height:1.5; margin:12px 0 0">
+          Prices and Greeks stream live from tastytrade. To trade this, click
+          <a href="/paper/">Execute</a> and send the idea through Paper Desk.
+        </p>
+      </section>
+    </aside>
+  </div>
+</main>
+
+<script src="analyze.js"></script>
+<script>
+Analyze.initHeader();
+const { fmt, fmtM, esc, api } = Analyze;
+
+const chainBody = document.getElementById('chainBody');
+const errBox = document.getElementById('errBox');
+const dataDot = document.getElementById('dataDot');
+let lastRows = [];
+let spot = null;
+let picked = null;
+
+function renderError(msg) {
+  errBox.innerHTML = msg ? `<div class="err-banner">${esc(msg)}</div>` : '';
+  dataDot.className = 'dot ' + (msg ? 'err' : 'ok');
+}
+
+function k(n) { if (n == null) return '—'; return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n); }
+
+function renderChain(rows, spotPx) {
+  lastRows = rows; spot = spotPx;
+  if (picked == null || !rows.some(r => r.strike === picked)) {
+    picked = rows.reduce((best, r) => Math.abs(r.strike - spotPx) < Math.abs(best - spotPx) ? r.strike : best, rows[0]?.strike ?? null);
+  }
+  const maxOi = Math.max(1, ...rows.map(r => Math.max(r.call?.oi || 0, r.put?.oi || 0)));
+  const sorted = [...rows].sort((a, b) => b.strike - a.strike);
+  const html = [];
+  let spotShown = false;
+  for (const r of sorted) {
+    if (!spotShown && spotPx != null && r.strike <= spotPx) {
+      html.push(`<tr><td colspan="15" style="padding:0"><div style="display:flex; align-items:center; gap:10px; height:22px; padding:0 12px">
+        <div style="flex-grow:1; border-top:1px dashed var(--text-hi); opacity:0.6"></div>
+        <span style="font-size:11px; font-weight:600; color:var(--text-hi)">SPOT ${fmt(spotPx)}</span>
+        <div style="flex-grow:1; border-top:1px dashed var(--text-hi); opacity:0.6"></div>
+      </div></td></tr>`);
+      spotShown = true;
+    }
+    const c = r.call, p = r.put;
+    const callItm = spotPx != null && r.strike < spotPx ? 'background:rgba(90,169,255,0.06)' : '';
+    const putItm = spotPx != null && r.strike > spotPx ? 'background:rgba(240,138,75,0.06)' : '';
+    const isPicked = r.strike === picked;
+    html.push(`<tr style="${isPicked ? 'background:#1C1D21' : ''}">
+      <td style="text-align:right; height:30px; ${callItm}"><div style="display:flex; justify-content:flex-end; align-items:center; gap:6px">
+        <div style="width:${Math.max(2, Math.round((c?.oi || 0) / maxOi * 40))}px; height:4px; border-radius:2px; background:var(--call); opacity:.55"></div>
+        <span style="color:var(--text-dim)">${k(c?.oi)}</span></div></td>
+      <td style="text-align:right; ${callItm}; color:var(--text-dim)">${k(c?.volume)}</td>
+      <td style="text-align:right; ${callItm}; color:var(--muted-row)">${c?.iv != null ? (c.iv * (c.iv > 3 ? 1 : 100)).toFixed(1) : '—'}</td>
+      <td style="text-align:right; ${callItm}; color:var(--muted-row)">${c?.gamma != null ? c.gamma.toFixed(3) : '—'}</td>
+      <td style="text-align:right; ${callItm}">${c?.delta != null ? c.delta.toFixed(2) : '—'}</td>
+      <td style="text-align:right; ${callItm}; color:var(--text-hi)">${fmt(c?.bid)}</td>
+      <td style="text-align:right; ${callItm}; color:var(--text-hi)">${fmt(c?.ask)}</td>
+      <td style="padding:0 4px; text-align:center; border-left:1px solid #2A2C31; border-right:1px solid #2A2C31; background:#121316">
+        <button type="button" data-strike="${r.strike}" style="width:100%; min-height:28px; background:${isPicked ? 'var(--accent)' : 'transparent'}; border:1px solid ${isPicked ? 'var(--accent)' : '#3A3C42'}; border-radius:4px; color:${isPicked ? '#15130D' : 'var(--text)'}; font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:600; cursor:pointer">${fmt(r.strike, 0)}</button>
+      </td>
+      <td style="${putItm}; color:var(--text-hi)">${fmt(p?.bid)}</td>
+      <td style="${putItm}; color:var(--text-hi)">${fmt(p?.ask)}</td>
+      <td style="${putItm}">${p?.delta != null ? p.delta.toFixed(2) : '—'}</td>
+      <td style="${putItm}; color:var(--muted-row)">${p?.gamma != null ? p.gamma.toFixed(3) : '—'}</td>
+      <td style="${putItm}; color:var(--muted-row)">${p?.iv != null ? (p.iv * (p.iv > 3 ? 1 : 100)).toFixed(1) : '—'}</td>
+      <td style="${putItm}; color:var(--text-dim)">${k(p?.volume)}</td>
+      <td style="${putItm}"><div style="display:flex; align-items:center; gap:6px">
+        <span style="color:var(--text-dim)">${k(p?.oi)}</span>
+        <div style="width:${Math.max(2, Math.round((p?.oi || 0) / maxOi * 40))}px; height:4px; border-radius:2px; background:var(--put); opacity:.55"></div></div></td>
+    </tr>`);
+  }
+  chainBody.innerHTML = html.join('');
+  chainBody.querySelectorAll('button[data-strike]').forEach(b => b.addEventListener('click', () => { picked = Number(b.dataset.strike); renderSelected(); renderChain(lastRows, spot); }));
+  renderSelected();
+}
+
+function renderSelected() {
+  const row = lastRows.find(r => r.strike === picked);
+  document.getElementById('selStrike').textContent = picked != null ? fmt(picked, 0) : '—';
+  if (!row) return;
+  const c = row.call, p = row.put;
+  document.getElementById('selCallMid').textContent = c ? fmt(c.mark ?? (c.bid + c.ask) / 2) : '—';
+  document.getElementById('selCallInfo').textContent = c ? `Δ ${fmt(c.delta, 2)} · IV ${fmt((c.iv > 3 ? c.iv : c.iv * 100), 1)}%` : '—';
+  document.getElementById('selPutMid').textContent = p ? fmt(p.mark ?? (p.bid + p.ask) / 2) : '—';
+  document.getElementById('selPutInfo').textContent = p ? `Δ ${fmt(p.delta, 2)} · IV ${fmt((p.iv > 3 ? p.iv : p.iv * 100), 1)}%` : '—';
+  const dist = spot != null ? picked - spot : null;
+  const facts = [
+    ['Distance from spot', dist != null ? `${dist >= 0 ? '+' : ''}${fmt(dist, 1)}` : '—'],
+    ['Open interest C / P', `${k(c?.oi)} / ${k(p?.oi)}`],
+    ['Volume C / P', `${k(c?.volume)} / ${k(p?.volume)}`],
+  ];
+  document.getElementById('selFacts').innerHTML = facts.map(([l, v]) => `<div class="factrow"><span>${esc(l)}</span><span class="v">${esc(v)}</span></div>`).join('');
+}
+
+let current = { symbol: 'SPX', expiry: null };
+let timer = null;
+
+async function refresh() {
+  if (!current.expiry) return;
+  const width = Number(document.getElementById('width').value);
+  try {
+    const [q, chain] = await Promise.all([
+      api(`/quote/${encodeURIComponent(current.symbol)}`),
+      api(`/chain/${encodeURIComponent(current.symbol)}?expiry=${encodeURIComponent(current.expiry)}&strikes=400`),
+    ]);
+    renderError(null);
+    document.getElementById('priceLast').textContent = fmt(q.last);
+    const chg = document.getElementById('priceChg');
+    chg.textContent = `${q.change >= 0 ? '+' : ''}${fmt(q.change)} (${q.changePct >= 0 ? '+' : ''}${fmt(q.changePct)}%)`;
+    chg.className = 'chg mono ' + (q.change >= 0 ? 'up' : 'down');
+
+    let rows = chain.strikes || [];
+    if (width < 900 && chain.underlying) {
+      const step = rows.length > 1 ? Math.abs(rows[1].strike - rows[0].strike) || 1 : 1;
+      rows = rows.filter(r => Math.abs(r.strike - chain.underlying) <= width * step);
+    }
+    renderChain(rows, chain.underlying);
+    document.getElementById('selExpiry').textContent = chain.expiry || '';
+    document.getElementById('atmIv').textContent = chain.iv != null ? fmt(chain.iv, 1) + '%' : '—';
+    const totalC = rows.reduce((s, r) => s + (r.call?.oi || 0), 0), totalP = rows.reduce((s, r) => s + (r.put?.oi || 0), 0);
+    document.getElementById('pcRatio').textContent = totalC ? fmt(totalP / totalC, 2) : '—';
+    document.getElementById('asOf').textContent = 'updated ' + new Date().toLocaleTimeString('en-US', { hour12: false });
+  } catch (e) {
+    renderError(e.message);
+  }
+}
+
+document.getElementById('width').addEventListener('change', refresh);
+
+Analyze.wireControls({
+  symbolInput: document.getElementById('symbol'),
+  expirySelect: document.getElementById('expiry'),
+  onChange(symbol, expiry, err) {
+    current = { symbol, expiry };
+    picked = null;
+    if (err) { renderError(err.message); return; }
+    clearTimeout(timer);
+    refresh();
+    const loop = () => { refresh(); timer = setTimeout(loop, 10000); };
+    timer = setTimeout(loop, 10000);
+  },
+});
+</script>
+</body>
+</html>

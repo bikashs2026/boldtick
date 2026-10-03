@@ -310,6 +310,7 @@ function computeGexSnapshot(chain, expDate) {
     callWall: gex ? gex.callWallStrike : null,
     putWall: gex ? gex.putWallStrike : null,
     gammaPinCenter: gex ? gex.gammaPinCenter : null,
+    byStrike: gex ? gex.profile : null, // [{ strike, callGEX, putGEX, netGEX, callOI, putOI }], ascending by strike
     pin: hasOI ? charmAdjPinTarget : null,
     dex,
     charm: charm ? {
