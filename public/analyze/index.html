@@ -58,6 +58,7 @@
         <span class="legend-item"><span class="swatch" style="background:var(--put)"></span>Put GEX</span>
       </div>
       <div id="ladder" style="display:flex; flex-direction:column; gap:3px"></div>
+      <div id="ladderMore" style="text-align:center; margin-top:8px"></div>
     </section>
 
     <aside class="panel-col">
@@ -101,12 +102,17 @@ const { fmt, fmtM, esc, api } = Analyze;
 
 const kpisEl = document.getElementById('kpis');
 const ladderEl = document.getElementById('ladder');
+const ladderMoreEl = document.getElementById('ladderMore');
 const errBox = document.getElementById('errBox');
 const updatedEl = document.getElementById('updated');
 const logBody = document.getElementById('logBody');
 const dataDot = document.getElementById('dataDot');
 const dataLabel = document.getElementById('dataLabel');
 const log = [];
+
+const LADDER_PCT = 0.05; // default window: strikes within ±5% of spot
+let ladderExpanded = false;
+let lastLadder = null; // { byStrike, spot, flip }
 
 function kpi(label, value, sub, color) {
   return `<div class="kpi"><span class="label">${esc(label)}</span><span class="value" style="color:${color || 'var(--text-hi)'}">${esc(value)}</span><span class="sub">${esc(sub)}</span></div>`;
@@ -118,9 +124,28 @@ function renderError(msg) {
 }
 
 function renderLadder(byStrike, spot, flip) {
-  if (!byStrike || !byStrike.length) { ladderEl.innerHTML = '<p class="empty">No open interest near the money yet.</p>'; return; }
-  const maxAbs = Math.max(1, ...byStrike.map(r => Math.max(Math.abs(r.callGEX), Math.abs(r.putGEX))));
-  const rows = [...byStrike].sort((a, b) => b.strike - a.strike);
+  lastLadder = { byStrike, spot, flip };
+  if (!byStrike || !byStrike.length) { ladderEl.innerHTML = '<p class="empty">No open interest near the money yet.</p>'; ladderMoreEl.innerHTML = ''; return; }
+
+  const all = [...byStrike].sort((a, b) => b.strike - a.strike);
+  let rows = all;
+  if (!ladderExpanded && spot != null) {
+    const lo = spot * (1 - LADDER_PCT), hi = spot * (1 + LADDER_PCT);
+    rows = all.filter(r => r.strike >= lo && r.strike <= hi);
+    if (!rows.length) rows = all; // fall back if the window is empty (e.g. no spot yet)
+  }
+
+  if (rows.length < all.length) {
+    ladderMoreEl.innerHTML = `<button id="ladderToggleBtn" class="note" style="cursor:pointer; background:none; border:1px solid var(--border, #2A2B30); border-radius:4px; padding:4px 10px; color:var(--text-dim)">Load more — showing ${rows.length} of ${all.length} strikes (±${Math.round(LADDER_PCT * 100)}%)</button>`;
+    document.getElementById('ladderToggleBtn').onclick = () => { ladderExpanded = true; renderLadder(lastLadder.byStrike, lastLadder.spot, lastLadder.flip); };
+  } else if (ladderExpanded && all.length) {
+    ladderMoreEl.innerHTML = `<button id="ladderToggleBtn" class="note" style="cursor:pointer; background:none; border:1px solid var(--border, #2A2B30); border-radius:4px; padding:4px 10px; color:var(--text-dim)">Show less — collapse to ±${Math.round(LADDER_PCT * 100)}% of spot</button>`;
+    document.getElementById('ladderToggleBtn').onclick = () => { ladderExpanded = false; renderLadder(lastLadder.byStrike, lastLadder.spot, lastLadder.flip); };
+  } else {
+    ladderMoreEl.innerHTML = '';
+  }
+
+  const maxAbs = Math.max(1, ...rows.map(r => Math.max(Math.abs(r.callGEX), Math.abs(r.putGEX))));
   const html = [];
   let spotShown = false, flipShown = false;
   for (const r of rows) {
