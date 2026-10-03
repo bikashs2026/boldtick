@@ -105,9 +105,14 @@ class TastyClient {
           await sleep(Math.min(8000, 500 * 2 ** attempt) + Math.random() * 250);
           continue;
         }
-        const detail = err.response?.data?.error?.message || err.response?.data?.error || err.message;
-        const e = new Error(`tastytrade ${method.toUpperCase()} ${url} failed${status ? ` (${status})` : ''}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
+        const errBody = err.response?.data?.error;
+        const nested = Array.isArray(errBody?.errors) && errBody.errors.length
+          ? ' — ' + errBody.errors.map(x => (typeof x === 'string' ? x : x.message || JSON.stringify(x))).join('; ')
+          : '';
+        const detail = errBody?.message || errBody || err.message;
+        const e = new Error(`tastytrade ${method.toUpperCase()} ${url} failed${status ? ` (${status})` : ''}: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}${nested}`);
         e.status = status;
+        e.detail = errBody;
         throw e;
       }
     }

@@ -8,6 +8,7 @@ The running version is shown in the website header, in the `npm start` summary a
 
 ### Fixed
 - Trade idea cards: an idea that couldn't be priced (for example, a malformed iron condor) showed max profit "open-ended" and max loss "stock risk". It now shows "—" for both; "stock risk" appears only on covered structures.
+- tastytrade error messages: a rejection's specific reason (tastytrade's nested `errors` list) was dropped, leaving only its generic wrapper message (for example "One or more preflight checks failed" with no detail). The specific reason is now included.
 
 ## [0.4] — 2026-10-03
 
