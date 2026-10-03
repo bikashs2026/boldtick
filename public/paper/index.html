@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paper Desk · BoldTick</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="paper-banner" role="status">PAPER TRADING — live prices, paper fills, never real money</div>
+
+<header class="top">
+  <div class="brand"><span class="mark" aria-hidden="true"></span><span>BoldTick</span><span class="sub">Paper Desk <span id="appVersion" class="mono"></span></span></div>
+  <nav class="tabs" aria-label="Sections">
+    <button type="button" data-tab="dashboard" class="active">Dashboard</button>
+    <button type="button" data-tab="ideas">Trade ideas <span class="count" id="ideaCount" hidden></span></button>
+    <button type="button" data-tab="orders">Orders</button>
+    <button type="button" data-tab="feed">Action feed</button>
+    <button type="button" data-tab="closed">Closed</button>
+    <button type="button" data-tab="settings">Settings</button>
+  </nav>
+  <div class="status" id="statusBar">
+    <span class="pill" id="pillBroker">fills …</span>
+    <span class="pill" id="pillMirror">paper acct …</span>
+    <span class="pill" id="pillData">data …</span>
+    <span class="pill mono" id="pillClock">…</span>
+    <span class="pill" id="pillSync" title="Last order sync">sync …</span>
+    <button type="button" class="btn small" id="btnSync">Refresh</button>
+    <button type="button" class="btn small" id="btnNotify" hidden>Enable alerts</button>
+    <button type="button" class="btn small kill" id="btnKill" aria-pressed="false">Kill switch: off</button>
+  </div>
+</header>
+
+<div id="killBanner" class="kill-banner" hidden></div>
+<div id="toast" class="toast" role="alert" hidden></div>
+
+<main>
+  <!-- Dashboard -->
+  <section data-view="dashboard" aria-label="Dashboard">
+    <div class="kpis" id="kpis"></div>
+    <div class="panel">
+      <div class="panel-head"><h2>Open positions</h2><span class="muted" id="posUpdated"></span></div>
+      <div class="table-wrap"><table class="grid" id="posTable"></table></div>
+      <p class="empty" id="posEmpty" hidden>No open positions. Approved ideas appear here once they fill.</p>
+    </div>
+  </section>
+
+  <!-- Ideas -->
+  <section data-view="ideas" aria-label="Trade ideas" hidden>
+    <div class="toolbar">
+      <label>Show
+        <select id="ideaFilter">
+          <option value="">Needs attention</option>
+          <option value="pending">Pending</option>
+          <option value="all">All</option>
+          <option value="invalid">Invalid</option>
+          <option value="rejected">Rejected</option>
+          <option value="expired">Expired</option>
+        </select>
+      </label>
+      <span class="muted">Muse sends ideas here; refreshes every 60 s and on every new idea.</span>
+    </div>
+    <div id="ideaList" class="cards"></div>
+    <p class="empty" id="ideaEmpty" hidden>No ideas to show.</p>
+  </section>
+
+  <!-- Orders -->
+  <section data-view="orders" aria-label="Orders" hidden>
+    <div class="toolbar">
+      <label>Status
+        <select id="orderFilter">
+          <option value="">All</option>
+          <option value="working,partially_filled,submitting">Working</option>
+          <option value="filled">Filled</option>
+          <option value="cancelled,expired">Cancelled</option>
+          <option value="rejected">Rejected</option>
+        </select>
+      </label>
+    </div>
+    <div class="panel"><div class="table-wrap"><table class="grid" id="orderTable"></table></div></div>
+  </section>
+
+  <!-- Feed -->
+  <section data-view="feed" aria-label="Action feed" hidden>
+    <div class="panel"><div id="feedList" class="feed"></div></div>
+  </section>
+
+  <!-- Closed -->
+  <section data-view="closed" aria-label="Closed trades" hidden>
+    <div class="kpis" id="closedKpis"></div>
+    <div class="panel"><div class="table-wrap"><table class="grid" id="closedTable"></table></div></div>
+  </section>
+
+  <!-- Settings -->
+  <section data-view="settings" aria-label="Settings" hidden>
+    <div class="toolbar">
+      <button type="button" class="btn primary" id="btnSaveSettings">Save changes</button>
+      <button type="button" class="btn" id="btnApplyOpen">Apply exit rules to open positions</button>
+      <button type="button" class="btn" id="btnResetSettings">Reset to defaults</button>
+      <span class="muted" id="settingsVersion"></span>
+    </div>
+    <form id="settingsForm" class="settings" novalidate></form>
+    <div class="panel">
+      <div class="panel-head"><h2>Exit rules per structure</h2><span class="muted">Blank = use the default above</span></div>
+      <div class="table-wrap"><table class="grid" id="perStructure"></table></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Change history</h2></div>
+      <div id="settingsHistory" class="feed"></div>
+    </div>
+  </section>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

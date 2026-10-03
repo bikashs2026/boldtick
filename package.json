@@ -1,0 +1,24 @@
+{
+  "name": "boldtick",
+  "version": "0.4.0",
+  "private": true,
+  "description": "BoldTick — Paper Desk: Muse trade ideas, live-market paper fills, tastytrade paper-account mirror",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/tastytrade.test.js test/paper.test.js",
+    "release": "node scripts/release.js",
+    "tt:smoke": "node scripts/tt-smoke.js",
+    "paper:muse-sim": "node scripts/muse-sim.js",
+    "paper:spike": "node scripts/paper-spike.js"
+  },
+  "dependencies": {
+    "axios": "^1.13.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "ws": "^8.19.0"
+  }
+}
