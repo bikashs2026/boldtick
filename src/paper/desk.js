@@ -223,6 +223,7 @@ class PaperDesk {
       external_id: kind === 'entry' ? idea.id : id,
       kind,
       idea_id: idea ? idea.id : position.idea_id,
+      client_idea_id: idea ? idea.client_idea_id : (position.client_idea_id ?? null),
       position_id: position ? position.id : null,
       symbol: idea ? idea.symbol : position.symbol,
       structure: idea ? idea.structure : position.structure,
@@ -284,6 +285,7 @@ class PaperDesk {
         pos = {
           id: newId('pos', this.clock.now()),
           idea_id: order.idea_id,
+          client_idea_id: idea ? idea.client_idea_id : null,
           order_id: order.id,
           symbol: order.symbol,
           structure: order.structure,

@@ -264,6 +264,8 @@ test('api: idea → approve → fill → signals → close → realized P&L, wit
   const pos = positions[0];
   assert.equal(pos.units, 1);
   assert.equal(pos.max_loss, Math.round((5 - pos.entry_price) * 100 * 100) / 100);
+  assert.equal(pos.client_idea_id, idea.client_idea_id, "position echoes Muse's own idea id, no server-id map needed");
+  assert.equal(ap.data.order.client_idea_id, idea.client_idea_id, 'orders echo it too');
 
   // Price drifts to the short call → engine raises STOP; Muse pushes its own signal.
   ctx.market.setSpot('SPX', 7700);
