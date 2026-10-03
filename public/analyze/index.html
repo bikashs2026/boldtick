@@ -110,7 +110,7 @@ const dataDot = document.getElementById('dataDot');
 const dataLabel = document.getElementById('dataLabel');
 const log = [];
 
-const LADDER_PCT = 0.05; // default window: strikes within ±5% of spot
+const LADDER_STRIKE_COUNT = 25; // default window: nearest N strikes on each side of spot
 let ladderExpanded = false;
 let lastLadder = null; // { byStrike, spot, flip }
 
@@ -130,16 +130,18 @@ function renderLadder(byStrike, spot, flip) {
   const all = [...byStrike].sort((a, b) => b.strike - a.strike);
   let rows = all;
   if (!ladderExpanded && spot != null) {
-    const lo = spot * (1 - LADDER_PCT), hi = spot * (1 + LADDER_PCT);
-    rows = all.filter(r => r.strike >= lo && r.strike <= hi);
+    const ascending = [...byStrike].sort((a, b) => a.strike - b.strike);
+    const below = ascending.filter(r => r.strike <= spot).slice(-LADDER_STRIKE_COUNT);
+    const above = ascending.filter(r => r.strike > spot).slice(0, LADDER_STRIKE_COUNT);
+    rows = [...below, ...above].sort((a, b) => b.strike - a.strike);
     if (!rows.length) rows = all; // fall back if the window is empty (e.g. no spot yet)
   }
 
   if (rows.length < all.length) {
-    ladderMoreEl.innerHTML = `<button id="ladderToggleBtn" class="note" style="cursor:pointer; background:none; border:1px solid var(--border, #2A2B30); border-radius:4px; padding:4px 10px; color:var(--text-dim)">Load more — showing ${rows.length} of ${all.length} strikes (±${Math.round(LADDER_PCT * 100)}%)</button>`;
+    ladderMoreEl.innerHTML = `<button id="ladderToggleBtn" class="note" style="cursor:pointer; background:none; border:1px solid var(--border, #2A2B30); border-radius:4px; padding:4px 10px; color:var(--text-dim)">Load more — showing ${rows.length} of ${all.length} strikes (nearest ${LADDER_STRIKE_COUNT} each side)</button>`;
     document.getElementById('ladderToggleBtn').onclick = () => { ladderExpanded = true; renderLadder(lastLadder.byStrike, lastLadder.spot, lastLadder.flip); };
   } else if (ladderExpanded && all.length) {
-    ladderMoreEl.innerHTML = `<button id="ladderToggleBtn" class="note" style="cursor:pointer; background:none; border:1px solid var(--border, #2A2B30); border-radius:4px; padding:4px 10px; color:var(--text-dim)">Show less — collapse to ±${Math.round(LADDER_PCT * 100)}% of spot</button>`;
+    ladderMoreEl.innerHTML = `<button id="ladderToggleBtn" class="note" style="cursor:pointer; background:none; border:1px solid var(--border, #2A2B30); border-radius:4px; padding:4px 10px; color:var(--text-dim)">Show less — collapse to nearest ${LADDER_STRIKE_COUNT} strikes each side</button>`;
     document.getElementById('ladderToggleBtn').onclick = () => { ladderExpanded = false; renderLadder(lastLadder.byStrike, lastLadder.spot, lastLadder.flip); };
   } else {
     ladderMoreEl.innerHTML = '';
