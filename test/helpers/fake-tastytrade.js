@@ -102,6 +102,7 @@ function startFakes() {
         fields = m.acceptEventFields;
         assert.equal(m.acceptDataFormat, 'COMPACT');
         ws.send(JSON.stringify({ type: 'FEED_CONFIG', channel: m.channel, dataFormat: 'COMPACT', eventFields: fields }));
+        seen.conn = { ws, channel: m.channel, fields };
       }
       if (m.type === 'FEED_SUBSCRIPTION' && m.add) {
         seen.subs.push(...m.add);
@@ -135,10 +136,23 @@ function startFakes() {
     });
   });
 
+  // Push one more Trade tick for an already-subscribed option streamer symbol
+  // (a later print, e.g. a bigger dayVolume at a new price) — used by tests
+  // that exercise live accumulation instead of just the first fill.
+  function pushTrade(symbol, { price, dayVolume, size = 1, change = 0 } = {}) {
+    const c = seen.conn;
+    if (!c) throw new Error('pushTrade: no DXLink connection yet');
+    const f = c.fields.Trade;
+    const src = { price, dayVolume, size, change };
+    const vals = f.map(k => k === 'eventType' ? 'Trade' : k === 'eventSymbol' ? symbol : (src[k] ?? 'NaN'));
+    const data = ['Trade', vals];
+    c.ws.readyState === 1 && c.ws.send(JSON.stringify({ type: 'FEED_DATA', channel: c.channel, data }));
+  }
+
   return new Promise(resolve => {
     server.listen(0, '127.0.0.1', () => {
       wsUrl = `ws://127.0.0.1:${wss.address().port}`;
-      resolve({ base: `http://127.0.0.1:${server.address().port}`, seen, close: () => { server.close(); wss.close(); } });
+      resolve({ base: `http://127.0.0.1:${server.address().port}`, seen, pushTrade, close: () => { server.close(); wss.close(); } });
     });
   });
 }

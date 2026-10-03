@@ -83,7 +83,28 @@
     </aside>
   </div>
 
-  <section class="panel" aria-label="Observed this session" style="overflow-x:auto">
+  <section class="panel" aria-label="Net premium flow">
+    <div class="panel-head">
+      <h2>Net premium flow</h2>
+      <span class="note">tick-level, from live tastytrade trade prints — not 5-minute snapshots</span>
+      <div class="spacer"></div>
+      <div style="display:flex; gap:6px">
+        <button type="button" id="flowRawBtn" class="pillinfo" style="cursor:pointer">Raw volume</button>
+        <button type="button" id="flowAggroBtn" class="pillinfo" style="cursor:pointer">Aggressor-adjusted</button>
+      </div>
+    </div>
+    <div class="kpis" id="flowKpis" style="margin-bottom:14px"></div>
+    <div style="background:#0E0F11; border:1px solid #1e1f24; border-radius:8px; padding:16px">
+      <svg id="flowSvg" width="100%" height="320" viewBox="0 0 1360 320" style="display:block"></svg>
+    </div>
+    <div style="display:flex; gap:22px; margin-top:12px; font-size:12px; color:var(--text-dim)">
+      <span style="display:flex; align-items:center; gap:6px"><span style="width:14px; height:2.5px; background:var(--call); display:inline-block"></span>Call side</span>
+      <span style="display:flex; align-items:center; gap:6px"><span style="width:14px; height:2.5px; background:var(--put); display:inline-block"></span>Put side</span>
+      <span style="display:flex; align-items:center; gap:6px"><span style="width:14px; height:0; border-top:1.5px dashed var(--text-faint); display:inline-block"></span>Spot (right axis)</span>
+    </div>
+  </section>
+
+  <section class="panel" aria-label="Observed this session" style="overflow-x:auto"
     <div class="panel-head">
       <h2>Observed this session</h2>
       <span class="note">logged here as each refresh comes in — not a trade signal</span>
@@ -235,13 +256,92 @@ function pushLog(snap) {
 
 let current = { symbol: 'SPX', expiry: null };
 let timer = null;
+let flowMode = 'aggro'; // 'raw' | 'aggro' — which line definition the chart shows; no server call needed to switch
+let lastFlow = null;
+
+function fmtMoney(v) {
+  if (v == null) return '—';
+  const abs = Math.abs(v);
+  return (v < 0 ? '-$' : '$') + (abs >= 1e6 ? (abs / 1e6).toFixed(1) + 'M' : abs >= 1e3 ? (abs / 1e3).toFixed(0) + 'K' : abs.toFixed(0));
+}
+
+function renderFlow(flow) {
+  lastFlow = flow;
+  document.getElementById('flowRawBtn').style.cssText = flowMode === 'raw'
+    ? 'cursor:pointer; border-color:var(--call); color:var(--call)' : 'cursor:pointer';
+  document.getElementById('flowAggroBtn').style.cssText = flowMode === 'aggro'
+    ? 'cursor:pointer; border-color:var(--accent); color:var(--accent)' : 'cursor:pointer';
+
+  const t = flow.totals;
+  const netCall = t.callBuy - t.callSell, netPut = t.putBuy - t.putSell;
+  const net = flowMode === 'raw' ? t.callPremium - t.putPremium : netCall - netPut;
+  document.getElementById('flowKpis').innerHTML = [
+    kpi('Call premium', fmtMoney(t.callPremium), flowMode === 'aggro' ? `net ${fmtMoney(netCall)}` : '', 'var(--call)'),
+    kpi('Put premium', fmtMoney(t.putPremium), flowMode === 'aggro' ? `net ${fmtMoney(netPut)}` : '', 'var(--put)'),
+    kpi('Net flow', (net >= 0 ? 'calls ' : 'puts ') + fmtMoney(Math.abs(net)), '', net >= 0 ? 'var(--call)' : 'var(--put)'),
+    kpi('Last print', flow.lastPrint ? `${flow.lastPrint.aggressor.toUpperCase()} ${fmt(flow.lastPrint.strike, 0)}${flow.lastPrint.side === 'CALL' ? 'C' : 'P'} × ${flow.lastPrint.size} @ ${fmt(flow.lastPrint.price, 2)}` : 'none yet', '', flow.lastPrint?.aggressor === 'sell' ? 'var(--put)' : flow.lastPrint?.aggressor === 'buy' ? 'var(--call)' : 'var(--text-hi)'),
+  ].join('');
+
+  const svg = document.getElementById('flowSvg');
+  const pts = flow.points || [];
+  if (!pts.length) { svg.innerHTML = '<text x="12" y="30" fill="#6b6c72" font-size="12">No trade prints yet this session.</text>'; return; }
+
+  const chartW = 1360, chartH = 240;
+  let callCum = 0, putCum = 0;
+  const series = pts.map(p => {
+    if (flowMode === 'raw') { callCum += p.callPremium; putCum += p.putPremium; }
+    else { callCum += (p.callBuy - p.callSell); putCum += (p.putBuy - p.putSell); }
+    return { callCum, putCum, price: p.price };
+  });
+  const maxAbs = Math.max(1, ...series.flatMap(s => [Math.abs(s.callCum), Math.abs(s.putCum)]));
+  const prices = series.map(s => s.price).filter(v => v != null);
+  const minP = prices.length ? Math.min(...prices) : 0, maxP = prices.length ? Math.max(...prices) : 1;
+
+  const n = series.length;
+  const xAt = i => n > 1 ? (i / (n - 1)) * chartW : 0;
+  const yVal = v => chartH / 2 - (v / maxAbs) * (chartH / 2 - 10);
+  const yPrice = v => chartH - ((v - minP) / (maxP - minP || 1)) * (chartH - 20) - 10;
+  const toPath = (arr, yfn) => arr.map((v, i) => `${i === 0 ? 'M' : 'L'} ${xAt(i).toFixed(1)} ${yfn(v).toFixed(1)}`).join(' ');
+
+  let lastPrice = null;
+  const priceSeries = series.map(s => (lastPrice = s.price != null ? s.price : lastPrice));
+  const callPath = toPath(series.map(s => s.callCum), yVal);
+  const putPath = toPath(series.map(s => s.putCum), yVal);
+  const pricePath = priceSeries.some(v => v != null) ? toPath(priceSeries.map(v => v ?? priceSeries.find(x => x != null) ?? 0), yPrice) : '';
+
+  const barW = Math.max(1, (chartW / n) * 0.55);
+  const barsSvg = pts.map((p, i) => {
+    const call = flowMode === 'raw' ? p.callPremium : Math.max(0, p.callBuy - p.callSell);
+    const put = flowMode === 'raw' ? p.putPremium : Math.max(0, p.putBuy - p.putSell);
+    const dom = call >= put ? 'call' : 'put';
+    const maxBar = Math.max(1, ...pts.map(q => Math.max(q.callPremium, q.putPremium)));
+    const h = Math.max(2, (Math.max(call, put) / maxBar) * 34);
+    const x = xAt(i) - barW / 2, y = chartH + 20 + (34 - h);
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${h.toFixed(1)}" fill="${dom === 'call' ? 'var(--call)' : 'var(--put)'}" opacity="0.85"></rect>`;
+  }).join('');
+
+  svg.innerHTML = `
+    <line x1="0" y1="${chartH / 2}" x2="${chartW}" y2="${chartH / 2}" stroke="#1e1f24"></line>
+    <line x1="0" y1="${chartH + 54}" x2="${chartW}" y2="${chartH + 54}" stroke="#2A2B30"></line>
+    <path d="${callPath}" fill="none" stroke="var(--call)" stroke-width="2.5"></path>
+    <path d="${putPath}" fill="none" stroke="var(--put)" stroke-width="2.5"></path>
+    ${pricePath ? `<path d="${pricePath}" fill="none" stroke="var(--text-faint)" stroke-width="1.5" stroke-dasharray="4 4"></path>` : ''}
+    ${barsSvg}
+    <text x="2" y="${chartH + 86}" fill="#6b6c72" font-size="11" font-family="monospace">${pts[0]?.t || ''}</text>
+    <text x="${chartW - 40}" y="${chartH + 86}" fill="#6b6c72" font-size="11" font-family="monospace">${pts[pts.length - 1]?.t || ''}</text>
+  `;
+}
+
+document.getElementById('flowRawBtn').onclick = () => { flowMode = 'raw'; if (lastFlow) renderFlow(lastFlow); };
+document.getElementById('flowAggroBtn').onclick = () => { flowMode = 'aggro'; if (lastFlow) renderFlow(lastFlow); };
 
 async function refresh() {
   if (!current.expiry) return;
   try {
-    const [q, snap] = await Promise.all([
+    const [q, snap, flow] = await Promise.all([
       api(`/quote/${encodeURIComponent(current.symbol)}`),
       api(`/gex/${encodeURIComponent(current.symbol)}?expiry=${encodeURIComponent(current.expiry)}`),
+      api(`/flow/${encodeURIComponent(current.symbol)}?expiry=${encodeURIComponent(current.expiry)}`),
     ]);
     renderError(null);
     document.getElementById('priceLast').textContent = fmt(q.last);
@@ -260,6 +360,7 @@ async function refresh() {
     ].join('');
 
     renderLadder(snap.byStrike, snap.price, snap.flip);
+    renderFlow(flow);
     renderSignal(snap);
     renderPinRows(snap);
     renderDexRows(snap);

@@ -245,6 +245,7 @@ class TastyMarketData extends EventEmitter {
     rec.at = Date.now();
     this.live.set(sym, rec);
     if (this.underlyings.has(sym)) this.emit('quote', sym, rec);
+    if (t === 'Trade') this.emit('trade', sym, rec); // every instrument, not just underlyings — premium-flow tracking listens here
   }
 
   _ensureUnderlyings(dxSymbols) {

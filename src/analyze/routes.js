@@ -6,6 +6,7 @@
 
 const express = require('express');
 const { computeGexSnapshot } = require('../gex');
+const { getFlowTracker } = require('./premiumFlow');
 
 const INDEX_ROOTS = new Set(['SPX', 'NDX', 'RUT', 'XSP', 'VIX']);
 function bareSymbol(s) { return String(s || '').trim().toUpperCase().replace(/^\$/, ''); }
@@ -89,6 +90,32 @@ function makeAnalyzeRouter({ market }) {
       const snap = computeGexSnapshot(chain, expiry);
       if (!snap) return res.status(404).json({ error: { code: 'not_found', message: 'no option chain / open interest to compute GEX from' } });
       res.json({ symbol, ...snap });
+    } catch (e) { fail(res, e); }
+  });
+
+  router.get('/flow/:symbol', async (req, res) => {
+    try {
+      const symbol = bareSymbol(req.params.symbol);
+      const prefixed = INDEX_ROOTS.has(symbol) ? `$${symbol}` : symbol;
+      const expiry = req.query.expiry || null;
+      const chain = await hub.getOptionsChain(prefixed, { strikeCount: 400, contractType: 'ALL', ...(expiry ? { fromDate: expiry, toDate: expiry } : {}) });
+      const callKey = Object.keys(chain.callExpDateMap || {}).find(k => !expiry || k.startsWith(expiry)) || Object.keys(chain.callExpDateMap || {})[0];
+      const putKey = Object.keys(chain.putExpDateMap || {}).find(k => !expiry || k.startsWith(expiry)) || Object.keys(chain.putExpDateMap || {})[0];
+      if (!callKey && !putKey) return res.status(404).json({ error: { code: 'not_found', message: 'no option chain for that expiry' } });
+
+      const tracker = getFlowTracker(hub, `${symbol}:${callKey || putKey}`);
+      const contracts = [];
+      for (const arr of Object.values(chain.callExpDateMap[callKey] || {})) for (const o of arr) if (o.streamerSymbol) contracts.push({ streamer: o.streamerSymbol, side: 'CALL', strike: o.strikePrice });
+      for (const arr of Object.values(chain.putExpDateMap[putKey] || {})) for (const o of arr) if (o.streamerSymbol) contracts.push({ streamer: o.streamerSymbol, side: 'PUT', strike: o.strikePrice });
+      tracker.trackContracts(contracts);
+      tracker.recordPriceSample(chain.underlyingPrice);
+
+      res.json({
+        symbol,
+        expiry: (callKey || putKey || '').split(':')[0] || expiry,
+        underlying: chain.underlyingPrice,
+        ...tracker.snapshot(),
+      });
     } catch (e) { fail(res, e); }
   });
 
