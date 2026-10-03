@@ -28,14 +28,21 @@ Unreleased for what's real.
 
 - **Conflicting-leg guard on opening orders.** Before accepting ANY
   opening order (BTO/STO) — from a Muse idea or a manual order, once
-  Build exists — check its legs against currently open positions. If a
-  leg's symbol+expiry+strike+type already exists in an open position
-  (either side), reject the opening order; only a closing order (BTC/STC)
-  against that exact existing leg is allowed. Example: already short the
-  SPX 7600P — a new idea or manual order that would also open the 7600P
-  (buy or sell) is blocked; only closing the existing 7600P short is
-  allowed. Prevents Muse (or a manual mistake) from quietly doubling up
-  or fighting an existing position on the same contract.
+  Build exists — check its legs against currently open positions.
+  Doubling down is allowed: a new opening order that exactly matches an
+  existing open structure leg-for-leg (same symbol, expiry, strike, type
+  AND side on every leg that touches an already-held strike) just adds
+  to that position. A conflict is anything else that touches an
+  already-held strike: a leg at a strike/expiry/type already open, where
+  the new order doesn't replicate the whole existing structure on that
+  overlap — mismatched side, a different combination of wings, or a
+  single leg opened on its own against an existing structure's strike.
+  That gets rejected; only a closing order (BTC/STC) against the
+  existing leg is allowed in that case. Example: already short an SPX
+  iron condor 7600P/7575P/7800C/7825C — a new order opening that exact
+  same IC (all four legs, same strikes/sides) is fine, a double-down.
+  A new order that sells the 7600P again but with different wings, or
+  opens just the 7600P alone, is a conflict and gets blocked.
 
 ## Known gaps (found, not yet closed)
 
