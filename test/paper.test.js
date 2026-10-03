@@ -315,6 +315,31 @@ test('api: invalid ideas are stored and reported; unknown symbols and bad JSON r
   assert.ok(ev.some(e => e.type === 'idea.invalid'));
 });
 
+test('api: an off-tick limit price is rejected, not silently rounded', async t => {
+  const ctx = await startApp();
+  t.after(ctx.close);
+
+  // SPX trades in $0.05 increments under $3 — 1.28 isn't one. Muse sending
+  // this should come back invalid, not get rounded into validation/risk math
+  // and only rounded for the order later (the old behavior).
+  const idea = await icIdea(ctx, { client_idea_id: 'tick-1', limit_price: 1.28 });
+  const r = await ctx.call('POST', '/api/paper/trade-ideas', ctx.muse, idea);
+  assert.equal(r.status, 422);
+  assert.equal(r.data.idea.status, 'invalid');
+  assert.ok(r.data.error.details.some(e => e.field === 'limit_price' && /not a valid tick/.test(e.issue)), JSON.stringify(r.data.error.details));
+
+  // A valid on-tick price for the same idea is accepted.
+  const ok = await icIdea(ctx, { client_idea_id: 'tick-2' });
+  const r2 = await ctx.call('POST', '/api/paper/trade-ideas', ctx.muse, ok);
+  assert.equal(r2.status, 201, JSON.stringify(r2.data));
+
+  // A manual override at Approve is checked the same way — the tick error
+  // throws before the reprice/portfolio checks even run.
+  const r3 = await ctx.call('POST', `/paper/api/trade-ideas/${r2.data.id}/approve`, ctx.owner, { confirm: true, limit_price: 2.03 });
+  assert.equal(r3.status, 422, JSON.stringify(r3.data));
+  assert.ok(r3.data.error.details.some(e => e.field === 'limit_price' && /not a valid tick/.test(e.issue)));
+});
+
 test('api: reprice check, kill switch, portfolio limits at approve', async t => {
   const ctx = await startApp();
   t.after(ctx.close);

@@ -8,7 +8,7 @@
 // trades per day) are only enforced at Approve; at creation they are warnings.
 
 const { STRUCTURES } = require('./settings');
-const { normLegs, units, sells, buys, riskProfile, openingPrice, legKey, r2 } = require('./pricing');
+const { normLegs, units, sells, buys, riskProfile, openingPrice, legKey, roundToTick, r2 } = require('./pricing');
 const { hmToMinutes } = require('./clock');
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -126,6 +126,15 @@ async function validateIdea(idea, ctx) {
   const symbol = idea.symbol.toUpperCase().replace(/^\$/, '');
   const price = Number(ctx.overridePrice ?? idea.limit_price);
   const u = units(legs);
+
+  // Exchange tick size: SPX/SPXW/XSP trade in $0.05 increments under $3 and
+  // $0.10 at/above $3; everything else in $0.01. An off-tick limit (Muse's
+  // number, or a manual override at Approve) is never silently rounded into
+  // validation and risk math — it's rejected here, before any of that runs.
+  const tickPrice = roundToTick(symbol, price);
+  if (Math.abs(price - tickPrice) > 1e-9) {
+    out.errors.push({ field: 'limit_price', issue: `${price.toFixed(2)} is not a valid tick for ${symbol} — nearest is ${tickPrice.toFixed(2)}` });
+  }
   const today = clock.today();
   const et = clock.et();
   const expiries = [...new Set(legs.map(l => l.expiry))].sort();
