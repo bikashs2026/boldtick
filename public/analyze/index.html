@@ -88,9 +88,12 @@
       <h2>Net premium flow</h2>
       <span class="note">tick-level, from live tastytrade trade prints — not 5-minute snapshots</span>
       <div class="spacer"></div>
-      <div style="display:flex; gap:6px">
-        <button type="button" id="flowRawBtn" class="pillinfo" style="cursor:pointer">Raw volume</button>
-        <button type="button" id="flowAggroBtn" class="pillinfo" style="cursor:pointer">Aggressor-adjusted</button>
+      <div class="flow-toggle">
+        <span class="flow-toggle-label" id="flowLabelRaw">Raw volume</span>
+        <button type="button" id="flowModeToggle" class="switch" role="switch" aria-label="Raw volume vs aggressor-adjusted">
+          <span class="switch-knob"></span>
+        </button>
+        <span class="flow-toggle-label" id="flowLabelAggro">Aggressor-adjusted</span>
       </div>
     </div>
     <div class="kpis" id="flowKpis" style="margin-bottom:14px"></div>
@@ -267,10 +270,9 @@ function fmtMoney(v) {
 
 function renderFlow(flow) {
   lastFlow = flow;
-  document.getElementById('flowRawBtn').style.cssText = flowMode === 'raw'
-    ? 'cursor:pointer; border-color:var(--call); color:var(--call)' : 'cursor:pointer';
-  document.getElementById('flowAggroBtn').style.cssText = flowMode === 'aggro'
-    ? 'cursor:pointer; border-color:var(--accent); color:var(--accent)' : 'cursor:pointer';
+  document.getElementById('flowModeToggle').classList.toggle('on', flowMode === 'aggro');
+  document.getElementById('flowLabelRaw').classList.toggle('active', flowMode === 'raw');
+  document.getElementById('flowLabelAggro').classList.toggle('active', flowMode === 'aggro');
 
   const t = flow.totals;
   const netCall = t.callBuy - t.callSell, netPut = t.putBuy - t.putSell;
@@ -332,8 +334,10 @@ function renderFlow(flow) {
   `;
 }
 
-document.getElementById('flowRawBtn').onclick = () => { flowMode = 'raw'; if (lastFlow) renderFlow(lastFlow); };
-document.getElementById('flowAggroBtn').onclick = () => { flowMode = 'aggro'; if (lastFlow) renderFlow(lastFlow); };
+function setFlowMode(mode) { flowMode = mode; if (lastFlow) renderFlow(lastFlow); }
+document.getElementById('flowModeToggle').onclick = () => setFlowMode(flowMode === 'raw' ? 'aggro' : 'raw');
+document.getElementById('flowLabelRaw').onclick = () => setFlowMode('raw');
+document.getElementById('flowLabelAggro').onclick = () => setFlowMode('aggro');
 
 async function refresh() {
   if (!current.expiry) return;
