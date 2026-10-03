@@ -298,6 +298,31 @@ test('api: idea → approve → fill → signals → close → realized P&L, wit
   assert.equal(ctx.desk.status().realized_today, closed[0].realized_pnl);
 });
 
+test("api: Muse can pull a symbol's option chain with its own key", async t => {
+  const ctx = await startApp();
+  t.after(ctx.close);
+
+  // No expiry given → defaults to the nearest listed expiration.
+  const auto = await ctx.call('GET', '/api/paper/chain/AMD', ctx.muse);
+  assert.equal(auto.status, 200, JSON.stringify(auto.data));
+  assert.equal(auto.data.symbol, 'AMD');
+  assert.ok(auto.data.expiry);
+  assert.ok(auto.data.underlying > 0);
+  assert.ok(Array.isArray(auto.data.contracts) && auto.data.contracts.length > 0);
+  assert.ok(auto.data.contracts[0].strike > 0 && ['call', 'put'].includes(auto.data.contracts[0].type));
+
+  // An explicit expiry + strike range narrows it.
+  const exp = auto.data.expiry;
+  const narrow = await ctx.call('GET', `/api/paper/chain/AMD?expiry=${exp}&strikeLow=155&strikeHigh=165`, ctx.muse);
+  assert.equal(narrow.status, 200);
+  assert.ok(narrow.data.contracts.every(c => c.strike >= 155 && c.strike <= 165));
+  assert.ok(narrow.data.contracts.length < auto.data.contracts.length);
+
+  // No credentials at all → unauthorized, same as every other route here.
+  const anon = await ctx.call('GET', '/api/paper/chain/AMD', {});
+  assert.equal(anon.status, 401);
+});
+
 test('api: invalid ideas are stored and reported; unknown symbols and bad JSON rejected', async t => {
   const ctx = await startApp();
   t.after(ctx.close);

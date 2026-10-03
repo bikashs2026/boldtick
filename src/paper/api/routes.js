@@ -107,6 +107,24 @@ function makeRouter({ desk, settings, events, store, auth, market, clock }) {
 
   r.get('/expirations/:symbol', h(async req => ({ symbol: req.params.symbol.toUpperCase(), expirations: await market.getExpirations(req.params.symbol), source: market.name })));
 
+  // Full option chain for one expiry — same shape every market source already
+  // returns internally for price-check and validation: { symbol, expiry,
+  // underlying, at, source, contracts: [{ type, strike, occ, bid, ask, mid, delta, iv }] }.
+  // ?expiry=YYYY-MM-DD; defaults to the nearest listed expiration if omitted.
+  // ?strikeLow= & ?strikeHigh= narrow the strike range; omit both for the full chain.
+  r.get('/chain/:symbol', h(async req => {
+    const symbol = req.params.symbol.toUpperCase();
+    let expiry = req.query.expiry;
+    if (!expiry) {
+      const exps = await market.getExpirations(symbol);
+      expiry = exps[0];
+      if (!expiry) throw new DeskError(404, 'not_found', `no expirations listed for ${symbol}`);
+    }
+    const lo = req.query.strikeLow !== undefined ? Number(req.query.strikeLow) : undefined;
+    const hi = req.query.strikeHigh !== undefined ? Number(req.query.strikeHigh) : undefined;
+    return await market.getChain(symbol, expiry, lo != null && hi != null ? { strikeRange: [lo, hi] } : {});
+  }));
+
   r.use((req, res) => res.status(404).json({ error: { code: 'not_found', message: `No route ${req.method} ${req.baseUrl}${req.path}` } }));
   return r;
 }
