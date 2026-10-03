@@ -204,8 +204,10 @@
       ['Limit', `${px(i.limit_price)} ${credit ? 'cr' : 'db'}`],
       ['Live mid / natural', c.priced ? `${px(c.live_mid)} / ${px(c.live_natural)}` : 'unpriced'],
       ['Underlying', px(c.underlying)],
-      ['Max profit', c.max_profit == null ? 'open-ended' : money(c.max_profit)],
-      ['Max loss', c.max_loss == null ? (c.assignment_risk ? `assignment ${money(c.assignment_risk)}` : 'stock risk') : money(c.max_loss)],
+      ['Max profit', c.max_profit != null ? money(c.max_profit) : (c.priced ? 'open-ended' : '—')],
+      ['Max loss', c.max_loss != null ? money(c.max_loss)
+        : c.assignment_risk ? `assignment ${money(c.assignment_risk)}`
+        : (c.priced && /^covered_/.test(i.structure || '')) ? 'stock risk' : '—'],
       ['Breakevens', c.breakevens ? c.breakevens.map(px).join(' / ') : '—'],
       ['Short Δ', c.short_deltas ? Object.entries(c.short_deltas).map(([k, v]) => `${k[0].toUpperCase()} ${Number(v).toFixed(2)}`).join(' ') : '—'],
       ["Muse's max loss", i.muse_max_loss == null ? '—' : money(i.muse_max_loss)],

@@ -6,6 +6,9 @@ The running version is shown in the website header, in the `npm start` summary a
 
 ## [Unreleased]
 
+### Fixed
+- Trade idea cards: an idea that couldn't be priced (for example, a malformed iron condor) showed max profit "open-ended" and max loss "stock risk". It now shows "—" for both; "stock risk" appears only on covered structures.
+
 ## [0.4] — 2026-10-03
 
 BoldTick becomes its own project.
