@@ -2,6 +2,10 @@
    switch/empty/eyebrow/err-banner rules with ../analyze/analyze.css */
 
 .controls { align-items: flex-end; }
+/* .field sets display:flex unconditionally in analyze.css, which (being
+   author CSS) overrides the browser's default [hidden] { display: none }
+   rule — so #codField needs its own override to actually hide. */
+.field[hidden] { display: none; }
 .spotline { display: flex; align-items: baseline; gap: 8px; margin-left: auto; }
 .spotline .v { font-family: 'JetBrains Mono', monospace; font-size: 22px; font-weight: 500; color: var(--text-hi); }
 .spotline .l { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; }

@@ -169,6 +169,8 @@ test('validation: shape rules per structure', () => {
   assert.ok(checkShape('bull_put_spread', L(['sell', 'put', 95], ['buy', 'put', 100]), 'credit').length);
   assert.equal(checkShape('diagonal', L(['buy', 'call', 100, 'G'], ['sell', 'call', 105, 'F']), 'debit').length, 0);
   assert.ok(checkShape('diagonal', L(['buy', 'call', 100, 'F'], ['sell', 'call', 105, 'G']), 'debit').length);
+  assert.equal(checkShape('diagonal', L(['buy', 'put', 100, 'G'], ['sell', 'put', 95, 'F']), 'debit').length, 0, 'diagonal is not call-only');
+  assert.ok(checkShape('diagonal', L(['buy', 'call', 100, 'G'], ['sell', 'put', 105, 'F']), 'debit').length, 'diagonal: both legs must be the same type');
   assert.ok(checkShape('calendar', L(['buy', 'call', 100, 'G'], ['sell', 'call', 105, 'F']), 'debit').length);
   assert.equal(checkShape('covered_call', L(['sell', 'call', 170]), 'credit').length, 0);
   assert.ok(checkShape('covered_strangle', L(['sell', 'call', 140], ['sell', 'put', 170]), 'credit').length);

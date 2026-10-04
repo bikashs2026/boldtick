@@ -78,11 +78,13 @@ function checkShape(structure, legs, creditOrDebit) {
       }
       want(credit, 'bull put spread is a credit trade');
       break;
-    case 'diagonal':
-      want(legs.length === 2 && sc.length === 1 && bc.length === 1, 'diagonal: buy call (back month), sell call (front month)');
-      if (!errors.length) want(bc[0].expiry > sc[0].expiry, 'diagonal: long call must expire after the short call');
+    case 'diagonal': {
+      const long = buys(legs), short = sells(legs);
+      want(legs.length === 2 && long.length === 1 && short.length === 1 && long[0].type === short[0].type, 'diagonal: buy and sell the same type (back month, front month)');
+      if (!errors.length) want(long[0].expiry > short[0].expiry, 'diagonal: long leg must expire after the short leg');
       want(!credit, 'diagonal is a debit trade');
       break;
+    }
     case 'calendar': {
       const long = buys(legs), short = sells(legs);
       want(legs.length === 2 && long.length === 1 && short.length === 1 && long[0].type === short[0].type, 'calendar: buy and sell the same type');

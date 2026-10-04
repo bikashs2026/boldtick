@@ -69,8 +69,8 @@
     bull_put_spread:  { creditOrDebit: 'credit', legs: [{ action: 'sell', type: 'put' }, { action: 'buy', type: 'put' }] },
     butterfly:        { creditOrDebit: 'debit',  legs: [{ action: 'buy', type: 'call' }, { action: 'sell', type: 'call' }, { action: 'buy', type: 'call' }], lockedBodyQty: 1 },
     rsb:              { creditOrDebit: null,     legs: [{ action: 'buy', type: 'call' }, { action: 'sell', type: 'call' }, { action: 'sell', type: 'put' }] },
-    diagonal:         { creditOrDebit: 'debit',  legs: [{ action: 'sell', type: 'call' }, { action: 'buy', type: 'call' }], crossExpiry: true },
-    calendar:         { creditOrDebit: 'debit',  legs: [{ action: 'sell', type: 'call' }, { action: 'buy', type: 'call' }], crossExpiry: true, lockedStrikeAndType: true },
+    diagonal:         { creditOrDebit: 'debit',  legs: [{ action: 'buy', type: 'call' }, { action: 'sell', type: 'call' }], crossExpiry: true, freeType: true },
+    calendar:         { creditOrDebit: 'debit',  legs: [{ action: 'buy', type: 'call' }, { action: 'sell', type: 'call' }], crossExpiry: true, freeType: true, syncStrikeAndType: true },
     covered_strangle: { creditOrDebit: 'credit', legs: [{ action: 'sell', type: 'put' }, { action: 'sell', type: 'call' }] },
     covered_call:     { creditOrDebit: 'credit', legs: [{ action: 'sell', type: 'call' }] },
     custom:           { creditOrDebit: null, legs: null, crossExpiry: true },
@@ -188,8 +188,8 @@
         const back = pickBackExpiry(frontExpiry);
         const atm = nearestStrike(front, 'call', front.underlying);
         return [
-          { action: 'sell', type: 'call', strike: atm, expiry: frontExpiry, qty: 1 },
           { action: 'buy', type: 'call', strike: atm, expiry: back, qty: 1 },
+          { action: 'sell', type: 'call', strike: atm, expiry: frontExpiry, qty: 1 },
         ];
       }
       default: // custom
@@ -206,14 +206,15 @@
     document.getElementById('legCapNote').textContent = editable ? `${legs.length}/4 legs` : '';
     document.getElementById('legsNote').textContent = editable
       ? 'Pick side, type and strike freely — up to 4 legs.'
-      : `${STRUCTURE_LABELS[structure]}: side and type are fixed by the structure; pick the strikes.`;
+      : slot.freeType
+        ? `${STRUCTURE_LABELS[structure]}: side is fixed by the structure; pick the type and strikes.`
+        : `${STRUCTURE_LABELS[structure]}: side and type are fixed by the structure; pick the strikes.`;
 
     body.innerHTML = legs.map((leg, i) => {
       const q = lastPriced && lastPriced.legs[i] && lastPriced.legs[i].strike === leg.strike && lastPriced.legs[i].type === leg.type ? lastPriced.legs[i] : null;
       const chain = chainCache.get(leg.expiry);
       const strikeOpts = chain ? strikesOf(chain, leg.type) : (leg.strike ? [leg.strike] : []);
-      const crossExpiry = slot.crossExpiry;
-      const lockedStrikeAndType = slot.lockedStrikeAndType && i === 1;
+      const typeEditable = editable || slot.freeType;
       const lockedQty = structure === 'butterfly' && i === 1; // the body — always 2x a wing's qty
       return `
         <tr data-i="${i}">
@@ -221,13 +222,11 @@
             <button type="button" class="side ${leg.action === 'buy' ? 'active buy' : ''}" data-side="buy"${editable ? '' : ' disabled'}>Buy</button>
             <button type="button" class="side ${leg.action === 'sell' ? 'active sell' : ''}" data-side="sell"${editable ? '' : ' disabled'}>Sell</button>
           </div></td>
-          <td><div class="seg${(editable && !lockedStrikeAndType) ? '' : ' readonly'}">
-            <button type="button" class="type ${leg.type === 'call' ? 'active call' : ''}" data-type="call"${(editable && !lockedStrikeAndType) ? '' : ' disabled'}>Call</button>
-            <button type="button" class="type ${leg.type === 'put' ? 'active put' : ''}" data-type="put"${(editable && !lockedStrikeAndType) ? '' : ' disabled'}>Put</button>
+          <td><div class="seg${typeEditable ? '' : ' readonly'}">
+            <button type="button" class="type ${leg.type === 'call' ? 'active call' : ''}" data-type="call"${typeEditable ? '' : ' disabled'}>Call</button>
+            <button type="button" class="type ${leg.type === 'put' ? 'active put' : ''}" data-type="put"${typeEditable ? '' : ' disabled'}>Put</button>
           </div></td>
-          <td>${lockedStrikeAndType
-            ? `<span class="mono">${leg.strike ?? '—'} (same as leg 1)</span>`
-            : `<select class="strikeSel">${strikeOpts.map(s => `<option value="${s}" ${s === leg.strike ? 'selected' : ''}>${s}</option>`).join('')}</select>`}</td>
+          <td><select class="strikeSel">${strikeOpts.map(s => `<option value="${s}" ${s === leg.strike ? 'selected' : ''}>${s}</option>`).join('')}</select></td>
           <td><select class="expSel">${expirationsList.map(e => `<option value="${e}" ${e === leg.expiry ? 'selected' : ''}>${e}</option>`).join('')}</select></td>
           <td>${lockedQty
             ? `<span class="mono" title="Always double a wing's qty">${leg.qty ?? '—'}</span>`
@@ -245,11 +244,15 @@
     body.querySelectorAll('tr').forEach(tr => {
       const i = Number(tr.dataset.i);
       tr.querySelectorAll('.side').forEach(b => b.onclick = () => { legs[i].action = b.dataset.side; renderLegs(); schedulePrice(); });
-      tr.querySelectorAll('.type').forEach(b => b.onclick = () => { legs[i].type = b.dataset.type; if (STRUCTURE_SLOTS[structure].lockedStrikeAndType) legs[1].type = legs[0].type; renderLegs(); schedulePrice(); });
+      tr.querySelectorAll('.type').forEach(b => b.onclick = () => {
+        legs[i].type = b.dataset.type;
+        if (STRUCTURE_SLOTS[structure].syncStrikeAndType) legs[i === 0 ? 1 : 0].type = legs[i].type;
+        renderLegs(); schedulePrice();
+      });
       const strikeSel = tr.querySelector('.strikeSel');
       if (strikeSel) strikeSel.onchange = e => {
         legs[i].strike = Number(e.target.value);
-        if (STRUCTURE_SLOTS[structure].lockedStrikeAndType && i === 0) legs[1].strike = legs[0].strike;
+        if (STRUCTURE_SLOTS[structure].syncStrikeAndType) legs[i === 0 ? 1 : 0].strike = legs[i].strike;
         renderLegs(); schedulePrice();
       };
       const expSel = tr.querySelector('.expSel');
