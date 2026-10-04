@@ -6,6 +6,7 @@
 const express = require('express');
 const { DeskError } = require('../desk');
 const { SettingsError } = require('../settings');
+const { riskProfile, openingPrice, normLegs, legKey } = require('../pricing');
 
 function makeRouter({ desk, settings, events, store, auth, market, clock }) {
   const r = express.Router();
@@ -124,6 +125,84 @@ function makeRouter({ desk, settings, events, store, auth, market, clock }) {
     const hi = req.query.strikeHigh !== undefined ? Number(req.query.strikeHigh) : undefined;
     return await market.getChain(symbol, expiry, lo != null && hi != null ? { strikeRange: [lo, hi] } : {});
   }));
+
+  // ── Build tab ──
+  // Live pricing for a structure the owner is constructing — reuses the same
+  // openingPrice/riskProfile math as validateIdea/approve so the numbers
+  // shown here never disagree with what Submit will actually enforce. Pure
+  // preview: nothing here is persisted.
+  r.post('/build/price', ownerOnly, h(async req => {
+    const b = req.body || {};
+    const symbol = String(b.symbol || '').toUpperCase().replace(/^\$/, '');
+    if (!symbol) throw new DeskError(400, 'bad_request', 'symbol is required');
+    if (!Array.isArray(b.legs) || !b.legs.length || b.legs.length > 4) throw new DeskError(400, 'bad_request', '1–4 legs required');
+    // Preview legs all share one qty (the builder's own "Contracts" field, or
+    // 1 while that's still unset) — every structure requires matching qty
+    // across its legs, and this is what scales max profit/loss to real $.
+    const qty = Number.isInteger(Number(b.quantity)) && Number(b.quantity) >= 1 ? Number(b.quantity) : 1;
+    const legs = normLegs({ legs: b.legs.map(l => ({ ...l, qty })), expiry: b.expiry });
+    const expiries = [...new Set(legs.map(l => l.expiry))].sort();
+    const lo = Math.min(...legs.map(l => l.strike)), hi = Math.max(...legs.map(l => l.strike));
+    const quotes = new Map();
+    let underlying = null;
+    for (const exp of expiries) {
+      const chain = await market.getChain(symbol, exp, { strikeRange: [lo, hi] });
+      underlying = chain.underlying ?? underlying;
+      for (const c of chain.contracts) quotes.set(`${exp}|${c.type}|${Number(c.strike)}`, c);
+    }
+    const missing = legs.filter(l => !quotes.has(legKey(l)));
+    if (missing.length) throw new DeskError(422, 'validation_failed', 'Some legs are not listed.', missing.map(l => ({ field: 'legs', issue: `${l.type} ${l.strike} is not listed for ${l.expiry}` })));
+    const creditOrDebit = b.credit_or_debit === 'debit' ? 'debit' : 'credit';
+    const entry = openingPrice(legs, quotes, creditOrDebit);
+    const risk = b.structure ? riskProfile(b.structure, legs, entry ? entry.mid : 0, creditOrDebit) : null;
+    const lastExpiry = expiries[expiries.length - 1];
+    const dte = Math.round((Date.parse(lastExpiry) - Date.parse(clock.today())) / 86_400_000);
+    return {
+      symbol, underlying, dte,
+      legs: legs.map(l => {
+        const q = quotes.get(legKey(l));
+        return { ...l, occ: q.occ, bid: q.bid, ask: q.ask, mid: q.mid, delta: q.delta, iv: q.iv, gamma: q.gamma, theta: q.theta, vega: q.vega };
+      }),
+      entry, risk,
+    };
+  }));
+
+  // Submits a manually built structure either as a pending trade idea (same
+  // queue Muse's ideas land in) or straight to the broker (creates the idea,
+  // then immediately runs the same desk.approve() path the Execute tab's own
+  // Approve button uses — portfolio limits, margin dry-run, broker submit,
+  // reprice-required on a stale price, all reused rather than duplicated).
+  r.post('/build/submit', ownerOnly, h(async req => {
+    const b = req.body || {};
+    const destination = b.destination === 'broker' ? 'broker' : 'ideas';
+    const qty = Number(b.quantity);
+    if (!Number.isInteger(qty) || qty < 1) throw new DeskError(400, 'bad_request', 'quantity must be a whole number ≥ 1');
+    if (!Array.isArray(b.legs) || !b.legs.length || b.legs.length > 4) throw new DeskError(400, 'bad_request', '1–4 legs required');
+    const ideaBody = {
+      client_idea_id: `build-${clock.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      symbol: b.symbol, structure: b.structure, expiry: b.expiry,
+      legs: b.legs.map(l => ({ action: l.action, type: l.type, strike: Number(l.strike), qty, expiry: l.expiry || b.expiry })),
+      limit_price: Number(b.limit_price),
+      credit_or_debit: b.credit_or_debit === 'debit' ? 'debit' : 'credit',
+      thesis: (typeof b.thesis === 'string' && b.thesis.trim()) ? b.thesis.trim() : 'Built manually on the Build tab.',
+    };
+    const { status, idea } = await desk.createIdea(ideaBody, req.caller.role);
+    if (status === 422) return { __status: 422, body: { error: { code: 'validation_failed', message: 'Order failed validation.', details: idea.validation.errors }, idea } };
+    if (destination === 'ideas') return { __status: 201, body: { idea } };
+    const out = await desk.approve(idea.id, { confirm: !!b.confirm }, req.caller.user);
+    return { __status: 202, body: { idea: out.idea, order: out.order } };
+  }));
+
+  // Templates: a reusable shape (structure + each leg's strike offset from
+  // spot), re-priced fresh every time it's loaded. Drafts: one specific
+  // built order (concrete strikes/price/qty) saved to revisit later.
+  r.get('/build/templates', ownerOnly, h(() => desk.listTemplates()));
+  r.post('/build/templates', ownerOnly, h(req => ({ __status: 201, body: desk.saveTemplate(req.body || {}) })));
+  r.delete('/build/templates/:id', ownerOnly, h(req => desk.deleteTemplate(req.params.id)));
+
+  r.get('/build/drafts', ownerOnly, h(() => desk.listDrafts()));
+  r.post('/build/drafts', ownerOnly, h(req => ({ __status: 201, body: desk.saveDraft(req.body || {}) })));
+  r.delete('/build/drafts/:id', ownerOnly, h(req => desk.deleteDraft(req.params.id)));
 
   r.use((req, res) => res.status(404).json({ error: { code: 'not_found', message: `No route ${req.method} ${req.baseUrl}${req.path}` } }));
   return r;

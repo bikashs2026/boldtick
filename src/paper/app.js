@@ -47,6 +47,7 @@ function createPaperApp({ env = process.env, dataDir, clock, market, broker, log
   app.use('/paper', auth.ownerPage, express.static(path.join(__dirname, '..', '..', 'public', 'paper'), { index: 'index.html' }));
   app.use('/api/analyze', auth.ownerPage, makeAnalyzeRouter({ market }));
   app.use('/analyze', auth.ownerPage, express.static(path.join(__dirname, '..', '..', 'public', 'analyze'), { index: 'index.html' }));
+  app.use('/build', auth.ownerPage, express.static(path.join(__dirname, '..', '..', 'public', 'build'), { index: 'index.html' }));
   app.get('/', (req, res) => res.redirect('/analyze/'));
 
   // ── background loops ──

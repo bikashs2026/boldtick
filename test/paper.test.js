@@ -762,3 +762,104 @@ test('mirror: cancelling a working order cancels its paper-account copy', async 
   assert.equal(c.data.mirror.status, 'cancelled');
   assert.equal(sb.cancels, 1);
 });
+
+// ── Build tab ────────────────────────────────────────────────────────────────
+test('api: Build tab — /build/price reuses the same risk math as approve, owner-only', async t => {
+  const ctx = await startApp();
+  t.after(ctx.close);
+  const legs = [
+    { action: 'sell', type: 'put', strike: 7615 }, { action: 'buy', type: 'put', strike: 7610 },
+    { action: 'sell', type: 'call', strike: 7685 }, { action: 'buy', type: 'call', strike: 7690 },
+  ];
+  const body = { symbol: 'SPX', structure: 'iron_condor', expiry: '2026-10-05', credit_or_debit: 'credit', legs };
+  assert.equal((await ctx.call('POST', '/api/paper/build/price', ctx.muse, body)).status, 403, 'Muse cannot use the Build tab');
+
+  const r = await ctx.call('POST', '/paper/api/build/price', ctx.owner, body);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.symbol, 'SPX');
+  assert.equal(r.data.underlying, 7650);
+  assert.equal(r.data.legs.length, 4);
+  assert.ok(r.data.legs.every(l => l.mid > 0 && l.iv > 0 && l.occ), 'every leg carries a live quote, ready to submit');
+  assert.equal(r.data.risk.defined, true);
+  assert.equal(r.data.risk.max_loss, Math.round((5 - r.data.entry.mid) * 100 * 100) / 100);
+
+  // The same two legs as a "custom" structure must agree exactly with the named bull_put_spread
+  // formula on everything economic — "width" is the one field the generic math doesn't report.
+  const vertical = { symbol: 'SPX', structure: 'custom', expiry: '2026-10-05', credit_or_debit: 'credit', legs: legs.slice(0, 2) };
+  const rc = await ctx.call('POST', '/paper/api/build/price', ctx.owner, vertical);
+  const named = await ctx.call('POST', '/paper/api/build/price', ctx.owner, { ...vertical, structure: 'bull_put_spread' });
+  assert.equal(rc.status, 200, JSON.stringify(rc.data));
+  assert.equal(rc.data.risk.width, null);
+  const { width: _w, ...customEconomics } = rc.data.risk;
+  const { width: _w2, ...namedEconomics } = named.data.risk;
+  assert.deepEqual(customEconomics, namedEconomics);
+});
+
+test('api: Build tab — submit to Trade Ideas vs direct to broker', async t => {
+  const ctx = await startApp();
+  t.after(ctx.close);
+  const legs = [
+    { action: 'sell', type: 'put', strike: 7615 }, { action: 'buy', type: 'put', strike: 7610 },
+    { action: 'sell', type: 'call', strike: 7685 }, { action: 'buy', type: 'call', strike: 7690 },
+  ];
+  const priced = await ctx.call('POST', '/paper/api/build/price', ctx.owner, { symbol: 'SPX', structure: 'iron_condor', expiry: '2026-10-05', credit_or_debit: 'credit', legs });
+  const limit = Math.floor(priced.data.entry.mid * 20) / 20;
+  const base = { symbol: 'SPX', structure: 'iron_condor', expiry: '2026-10-05', credit_or_debit: 'credit', legs, limit_price: limit, quantity: 1, thesis: 'test build' };
+
+  const toIdeas = await ctx.call('POST', '/paper/api/build/submit', ctx.owner, { ...base, destination: 'ideas' });
+  assert.equal(toIdeas.status, 201, JSON.stringify(toIdeas.data));
+  assert.equal(toIdeas.data.idea.status, 'pending', 'queued for review, nothing sent to the broker yet');
+  assert.equal(toIdeas.data.idea.source, 'owner');
+  assert.equal((await ctx.call('GET', '/paper/api/orders', ctx.owner)).data.length, 0);
+
+  const toBroker = await ctx.call('POST', '/paper/api/build/submit', ctx.owner, { ...base, destination: 'broker' });
+  assert.equal(toBroker.status, 202, JSON.stringify(toBroker.data));
+  assert.equal(toBroker.data.idea.status, 'approved', 'direct-to-broker auto-approves the idea it just created');
+  assert.equal(toBroker.data.order.status, 'filled');
+
+  assert.equal((await ctx.call('POST', '/api/paper/build/submit', ctx.muse, { symbol: 'SPX' })).status, 403, 'Muse cannot submit from Build');
+});
+
+test('api: Build tab — a custom structure\'s risk is computed, not assumed: a naked short call is undefined risk', async t => {
+  const ctx = await startApp();
+  t.after(ctx.close);
+  await ctx.call('PUT', '/paper/api/settings', ctx.owner, { version: 1, values: { 'risk.allow_undefined_risk': false } });
+  const r = await ctx.call('POST', '/paper/api/build/submit', ctx.owner, {
+    symbol: 'SPX', structure: 'custom', expiry: '2026-10-05', credit_or_debit: 'credit',
+    legs: [{ action: 'sell', type: 'call', strike: 7685 }],
+    limit_price: 2, quantity: 1, thesis: 'naked call', destination: 'ideas',
+  });
+  assert.equal(r.status, 422, JSON.stringify(r.data));
+  assert.ok(r.data.idea.validation.errors.some(e => /undefined risk/.test(e.issue)));
+});
+
+test('api: Build tab — templates (reusable shape) and drafts (concrete saved order)', async t => {
+  const ctx = await startApp();
+  t.after(ctx.close);
+  const legs = [
+    { action: 'sell', type: 'put', strike: 7615 }, { action: 'buy', type: 'put', strike: 7610 },
+    { action: 'sell', type: 'call', strike: 7685 }, { action: 'buy', type: 'call', strike: 7690 },
+  ];
+
+  const tpl = await ctx.call('POST', '/paper/api/build/templates', ctx.owner, {
+    name: 'My 0DTE condor', symbol: 'SPX', structure: 'iron_condor', credit_or_debit: 'credit', underlying: 7650, legs,
+  });
+  assert.equal(tpl.status, 201, JSON.stringify(tpl.data));
+  assert.equal(tpl.data.legs[0].strike_offset, -35, 'strike stored as an offset from spot, not a fixed number');
+  assert.equal((await ctx.call('GET', '/paper/api/build/templates', ctx.owner)).data.length, 1);
+  assert.equal((await ctx.call('DELETE', `/paper/api/build/templates/${tpl.data.id}`, ctx.owner)).status, 200);
+  assert.equal((await ctx.call('GET', '/paper/api/build/templates', ctx.owner)).data.length, 0);
+
+  const draft = await ctx.call('POST', '/paper/api/build/drafts', ctx.owner, {
+    name: 'Maybe later', symbol: 'SPX', structure: 'iron_condor', expiry: '2026-10-05', credit_or_debit: 'credit',
+    legs, limit_price: 1.5, quantity: 1, thesis: 'parked for now',
+  });
+  assert.equal(draft.status, 201, JSON.stringify(draft.data));
+  assert.equal(draft.data.legs[0].strike, 7615, 'draft keeps the concrete strike, not an offset');
+  assert.equal((await ctx.call('GET', '/paper/api/build/drafts', ctx.owner)).data.length, 1);
+  assert.equal((await ctx.call('DELETE', `/paper/api/build/drafts/${draft.data.id}`, ctx.owner)).status, 200);
+  assert.equal((await ctx.call('GET', '/paper/api/build/drafts', ctx.owner)).data.length, 0);
+
+  assert.equal((await ctx.call('GET', '/api/paper/build/templates', ctx.muse)).status, 403, 'Muse cannot read Build templates or drafts');
+  assert.equal((await ctx.call('GET', '/api/paper/build/drafts', ctx.muse)).status, 403);
+});

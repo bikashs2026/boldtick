@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BoldTick · Build</title>
+<link rel="stylesheet" href="../analyze/analyze.css">
+<link rel="stylesheet" href="build.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><div class="mark"></div><span class="name">BoldTick</span></div>
+  <nav class="sections" aria-label="Sections">
+    <a href="/analyze/">Analyze</a>
+    <a href="/build/" class="active">Build</a>
+    <a href="/paper/">Execute</a>
+    <span class="disabled" title="Not built yet">Monitor</span>
+  </nav>
+  <div class="spacer"></div>
+  <div class="status-cluster">
+    <span class="mono" id="clock"></span>
+  </div>
+</header>
+
+<main class="build-main">
+  <!-- Controls -->
+  <section class="panel">
+    <div class="controls">
+      <div class="field"><label for="symIn">Symbol</label><input id="symIn" class="sym" value="SPX" autocomplete="off"></div>
+      <div class="field"><label for="expSel">Expiry</label><select id="expSel"></select></div>
+      <div class="field"><label for="tplSel">Structure</label>
+        <select id="tplSel">
+          <option value="iron_condor">Iron condor</option>
+          <option value="bull_put_spread">Bull put spread</option>
+          <option value="diagonal">Diagonal (call)</option>
+          <option value="calendar">Calendar</option>
+          <option value="covered_strangle">Covered strangle</option>
+          <option value="covered_call">Covered call</option>
+          <option value="custom">Custom</option>
+        </select>
+      </div>
+      <div class="field" id="codField" hidden><label for="codSel">Price is</label>
+        <select id="codSel"><option value="credit">Credit</option><option value="debit">Debit</option></select>
+      </div>
+      <div class="spotline"><span class="v mono" id="spotVal">—</span><span class="l">spot</span></div>
+    </div>
+    <p class="err-banner" id="loadErr" hidden></p>
+  </section>
+
+  <!-- Legs -->
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Legs</h2>
+      <span class="note" id="legsNote">Strikes load from the live chain</span>
+    </div>
+    <table class="gridtable legs">
+      <thead><tr><th>Side</th><th>Type</th><th>Strike</th><th>Expiry</th><th>Bid</th><th>Ask</th><th>Mid</th><th>Delta</th><th></th></tr></thead>
+      <tbody id="legsBody"></tbody>
+    </table>
+    <button type="button" class="btn small addrow" id="btnAddLeg">+ Add leg</button>
+    <span class="note" id="legCapNote"></span>
+  </section>
+
+  <!-- Stats -->
+  <section class="panel">
+    <div class="stats" id="statsRow"></div>
+  </section>
+
+  <!-- Chart -->
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Profit / loss</h2>
+      <span class="note">Hover the chart for a price readout</span>
+    </div>
+    <div class="legend">
+      <span class="legend-item exp"><span class="ln"></span>At expiration</span>
+      <span class="legend-item t0"><span class="ln"></span>T+0 (as of the date below)</span>
+    </div>
+    <div class="chartwrap">
+      <canvas id="pnlchart"></canvas>
+      <div class="tooltip" id="tooltip"></div>
+    </div>
+    <div class="asof">
+      <span class="lbl" id="asofLabel">As of —</span>
+      <input type="range" id="asofSlider" min="0" max="1" step="0.1" value="0">
+    </div>
+    <p class="note" id="ivNote">IV per leg comes from the live chain; the T+0 line assumes it stays fixed as price moves (sticky-strike) and a flat 4.5% risk-free rate — a modeled estimate, not a quote.</p>
+  </section>
+
+  <!-- Destination + submit -->
+  <section class="panel">
+    <div class="destrow">
+      <div class="dest-switch">
+        <span class="dest-label active" id="lblIdeas">Send to Trade Ideas</span>
+        <button type="button" id="destSwitch" class="switch" role="switch" aria-label="Destination: Trade Ideas vs direct to broker"><span class="switch-knob"></span></button>
+        <span class="dest-label" id="lblBroker">Direct to broker</span>
+      </div>
+      <div class="spacer"></div>
+      <div class="qtyfield"><label for="contractsIn">Contracts</label><input id="contractsIn" type="number" min="1" value="1"></div>
+      <button type="button" class="btn ghost" id="btnSaveDraft">Save for later</button>
+      <button type="button" class="btn ghost" id="btnSaveTemplate">Save as template</button>
+      <button type="button" class="btn primary" id="btnSubmit">Add to Trade Ideas</button>
+    </div>
+    <label class="field" style="margin-top:12px"><span>Thesis (optional)</span><textarea id="thesisIn" rows="2" placeholder="Why this trade — shown on the idea card."></textarea></label>
+  </section>
+
+  <!-- Confirm panel (direct-to-broker only) -->
+  <section class="panel" id="confirmPanel" hidden>
+    <div class="panel-head">
+      <h2>Review before sending</h2>
+      <span class="note">Direct-to-broker skips the idea queue — confirm here instead</span>
+    </div>
+    <div class="confirm-grid">
+      <div class="stat"><span class="l">Structure</span><span class="v mono" id="cfStruct" style="font-size:13px;"></span></div>
+      <div class="stat"><span class="l">Limit price</span><span class="v mono" id="cfPrice"></span></div>
+      <div class="stat"><span class="l">Contracts</span><span class="v mono" id="cfQty"></span></div>
+      <div class="stat"><span class="l">Max loss</span><span class="v mono" id="cfMaxLoss"></span></div>
+    </div>
+    <p class="note" id="cfRepriceNote" hidden></p>
+    <div class="confirm-actions">
+      <button type="button" class="btn primary" id="btnConfirmSend">Confirm &amp; send to broker</button>
+      <button type="button" class="btn ghost" id="btnConfirmCancel">Cancel</button>
+    </div>
+  </section>
+
+  <!-- Saved: templates + drafts -->
+  <section class="panel">
+    <div class="panel-head">
+      <h2>Saved</h2>
+      <span class="note">Templates re-price fresh against the live chain; drafts keep the exact order you built</span>
+    </div>
+    <div class="saved-cols">
+      <div>
+        <div class="eyebrow">Templates</div>
+        <div id="templatesList"><p class="empty" id="templatesEmpty">No templates saved yet.</p></div>
+      </div>
+      <div>
+        <div class="eyebrow">Drafts</div>
+        <div id="draftsList"><p class="empty" id="draftsEmpty">No drafts saved yet.</p></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+
+<script src="../analyze/analyze.js"></script>
+<script src="build.js"></script>
+</body>
+</html>

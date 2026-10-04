@@ -103,6 +103,13 @@ function checkShape(structure, legs, creditOrDebit) {
       want(legs.length === 1 && sc.length === 1, 'covered call: one short call');
       want(credit, 'covered call is a credit trade');
       break;
+    case 'custom':
+      // No shape constraint beyond the universal 1–4 legs and matching-qty
+      // checks above — this is the Build tab's freeform leg list. Risk is
+      // computed numerically (pricing.js's genericRiskProfile) instead of a
+      // named formula, and credit_or_debit is taken as given rather than
+      // required to match a fixed direction.
+      break;
   }
   return errors;
 }
@@ -159,7 +166,7 @@ async function validateIdea(idea, ctx) {
   limit('risk.allowed_structures', !settings.value('risk.allowed_structures').includes(idea.structure), `${idea.structure} is not an allowed structure`);
   limit('risk.max_contracts', u > settings.value('risk.max_contracts'), `${u} contracts exceeds the limit of ${settings.value('risk.max_contracts')}`);
 
-  const risk = riskProfile(idea.structure, legs, price);
+  const risk = riskProfile(idea.structure, legs, price, idea.credit_or_debit);
   out.computed = { units: u, zero_dte: zeroDte, ...risk };
   if (!risk.defined && !settings.value('risk.allow_undefined_risk')) {
     out.errors.push({ field: 'risk.allow_undefined_risk', issue: `${idea.structure} has undefined risk and undefined-risk structures are turned off in Settings` });

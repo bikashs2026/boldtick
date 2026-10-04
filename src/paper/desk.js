@@ -28,6 +28,8 @@ class PaperDesk {
     this.ideas = store.load('ideas.json', []);
     this.orders = store.load('orders.json', []);
     this.positions = store.load('positions.json', []);
+    this.templates = store.load('templates.json', []);
+    this.drafts = store.load('drafts.json', []);
     this.state = store.load('state.json', { kill: { on: false } });
     this.signals = store.readLines('signals.jsonl');
     this.killEnv = env.PAPER_KILL === '1';
@@ -46,6 +48,8 @@ class PaperDesk {
       if (n === 'ideas') this.store.save('ideas.json', this.ideas);
       if (n === 'orders') this.store.save('orders.json', this.orders);
       if (n === 'positions') this.store.save('positions.json', this.positions);
+      if (n === 'templates') this.store.save('templates.json', this.templates);
+      if (n === 'drafts') this.store.save('drafts.json', this.drafts);
       if (n === 'state') this.store.save('state.json', this.state);
     }
   }
@@ -279,7 +283,7 @@ class PaperDesk {
       const idea = this.ideas.find(i => i.id === order.idea_id);
       let pos = order.position_id && this.positions.find(p => p.id === order.position_id);
       const legs = order.legs.map(l => ({ ...l, qty: order.filled_quantity }));
-      const risk = riskProfile(order.structure, legs, order.avg_fill_price ?? order.limit_price);
+      const risk = riskProfile(order.structure, legs, order.avg_fill_price ?? order.limit_price, order.price_effect);
       if (!pos) {
         const at = this.nowIso();
         pos = {
@@ -704,7 +708,7 @@ class PaperDesk {
     const open = this.positions.filter(p => p.status !== 'closed').map(p => ({ symbol: p.symbol, max_loss: p.max_loss, defined: p.defined }));
     // Working entry orders count as exposure too.
     for (const o of this.orders.filter(x => x.kind === 'entry' && ['submitting', 'working', 'received'].includes(x.status) && !x.position_id)) {
-      const r = riskProfile(o.structure, o.legs.map(l => ({ ...l, qty: o.units })), o.limit_price);
+      const r = riskProfile(o.structure, o.legs.map(l => ({ ...l, qty: o.units })), o.limit_price, o.price_effect);
       open.push({ symbol: o.symbol, max_loss: r.max_loss, defined: r.defined });
     }
     return {
@@ -769,11 +773,78 @@ class PaperDesk {
     if (missing.length) throw new DeskError(422, 'validation_failed', 'Some legs are not listed.', missing.map(l => ({ field: 'legs', issue: `${l.type} ${l.strike} not listed for ${l.expiry}` })));
     const cod = body.credit_or_debit === 'debit' ? 'debit' : 'credit';
     const live = openingPrice(legs, quotes, cod);
-    const risk = body.structure ? riskProfile(body.structure, legs, live.mid) : null;
+    const risk = body.structure ? riskProfile(body.structure, legs, live.mid, cod) : null;
     return {
       symbol, underlying, credit_or_debit: cod, mid: live.mid, natural: live.natural, risk_at_mid: risk,
       legs: legs.map(l => { const q = quotes.get(legKey(l)); return { ...l, occ: q.occ, bid: q.bid, ask: q.ask, mid: q.mid, delta: q.delta, iv: q.iv }; }),
     };
+  }
+
+  // ── Build tab: templates & drafts ──
+  // Templates store a reusable *shape* — structure + each leg's strike as an
+  // offset from the underlying price at save time — so it re-prices against
+  // a fresh chain whenever it's loaded later. Drafts store one *specific*
+  // built order (concrete strikes/price/qty) to come back to and decide on.
+  // Neither touches ideas/orders/positions; both are pure Build-tab state
+  // that never submits anything on its own.
+  listTemplates() { return this.templates.slice().reverse(); }
+
+  saveTemplate(body = {}) {
+    const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim().slice(0, 80) : null;
+    if (!name) throw new DeskError(400, 'bad_request', 'name is required');
+    if (!Array.isArray(body.legs) || !body.legs.length || body.legs.length > 4) throw new DeskError(400, 'bad_request', '1-4 legs required');
+    const underlying = Number(body.underlying);
+    if (!(underlying > 0)) throw new DeskError(400, 'bad_request', 'underlying (the spot price legs were offset from) is required');
+    const template = {
+      id: newId('tpl', this.clock.now()),
+      name,
+      symbol: String(body.symbol || '').toUpperCase().replace(/^\$/, ''),
+      structure: body.structure,
+      credit_or_debit: body.credit_or_debit === 'debit' ? 'debit' : 'credit',
+      legs: body.legs.map(l => ({ action: l.action === 'buy' ? 'buy' : 'sell', type: l.type === 'put' ? 'put' : 'call', strike_offset: r2(Number(l.strike) - underlying) })),
+      created_at: this.nowIso(),
+    };
+    this.templates.push(template);
+    this.save('templates');
+    return template;
+  }
+
+  deleteTemplate(id) {
+    const before = this.templates.length;
+    this.templates = this.templates.filter(t => t.id !== id);
+    if (this.templates.length === before) throw new DeskError(404, 'not_found', `No template ${id}`);
+    this.save('templates');
+    return { ok: true };
+  }
+
+  listDrafts() { return this.drafts.slice().reverse(); }
+
+  saveDraft(body = {}) {
+    if (!Array.isArray(body.legs) || !body.legs.length || body.legs.length > 4) throw new DeskError(400, 'bad_request', '1-4 legs required');
+    const draft = {
+      id: newId('draft', this.clock.now()),
+      name: typeof body.name === 'string' && body.name.trim() ? body.name.trim().slice(0, 80) : null,
+      symbol: String(body.symbol || '').toUpperCase().replace(/^\$/, ''),
+      structure: body.structure,
+      expiry: body.expiry,
+      legs: body.legs.map(l => ({ action: l.action === 'buy' ? 'buy' : 'sell', type: l.type === 'put' ? 'put' : 'call', strike: Number(l.strike), expiry: l.expiry || body.expiry })),
+      credit_or_debit: body.credit_or_debit === 'debit' ? 'debit' : 'credit',
+      limit_price: numOrNull(body.limit_price),
+      quantity: Number.isInteger(Number(body.quantity)) && Number(body.quantity) >= 1 ? Number(body.quantity) : 1,
+      thesis: typeof body.thesis === 'string' ? body.thesis.slice(0, 4000) : '',
+      created_at: this.nowIso(),
+    };
+    this.drafts.push(draft);
+    this.save('drafts');
+    return draft;
+  }
+
+  deleteDraft(id) {
+    const before = this.drafts.length;
+    this.drafts = this.drafts.filter(d => d.id !== id);
+    if (this.drafts.length === before) throw new DeskError(404, 'not_found', `No draft ${id}`);
+    this.save('drafts');
+    return { ok: true };
   }
 
   // ── views ──

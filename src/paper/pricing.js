@@ -20,7 +20,7 @@ const sells = (legs, type) => legs.filter(l => l.action === 'sell' && (!type || 
 const buys  = (legs, type) => legs.filter(l => l.action === 'buy'  && (!type || l.type === type));
 
 // Risk for one structure at a given limit price. Returns $ totals for all units.
-function riskProfile(structure, legs, price) {
+function riskProfile(structure, legs, price, creditOrDebit) {
   const u = units(legs);
   const p = Number(price);
   switch (structure) {
@@ -49,9 +49,68 @@ function riskProfile(structure, legs, price) {
       return { defined: false, covered: true, width: null, max_profit: r2(p * MULT * u), max_loss: null,
         assignment_risk: r2((sp.strike - p) * MULT * u), breakevens: null };
     }
+    case 'custom':
+      return genericRiskProfile(legs, p, creditOrDebit);
     default:
       return { defined: false, width: null, max_profit: null, max_loss: null, breakevens: null };
   }
+}
+
+// Per-share payoff of a leg combination at expiration, for an arbitrary (not
+// necessarily named) structure — intrinsic value only, no entry price baked
+// in. Used by genericRiskProfile below and by the Build tab's P&L curve, so
+// both agree on the same math.
+function payoffAtExpiry(legs, S) {
+  return legs.reduce((sum, l) => {
+    const intrinsic = l.type === 'call' ? Math.max(0, S - l.strike) : Math.max(0, l.strike - S);
+    return sum + (l.action === 'buy' ? intrinsic : -intrinsic);
+  }, 0);
+}
+
+// Risk profile for any leg combination, computed numerically instead of from
+// a named structure's formula — this is what the "custom" structure uses,
+// and what the Build tab's stat tiles (max profit/loss, breakevens) use for
+// every structure so the UI never has to special-case the math per shape.
+//
+// Only the upper tail can be unbounded here: every leg's price floor is 0
+// (the underlying can't go negative), so the downside is always bounded by
+// the payoff at S=0; the upside is unbounded exactly when there are more
+// short calls than long calls (a naked/uncovered short call).
+function genericRiskProfile(legs, price, creditOrDebit) {
+  const u = units(legs);
+  const p = Number(price);
+  const entryCash = creditOrDebit === 'debit' ? -p : p; // $ received (credit) per share at entry
+
+  const callLegs = legs.filter(l => l.type === 'call');
+  const upSlope = callLegs.reduce((s, l) => s + (l.action === 'buy' ? 1 : -1), 0);
+  const definedLoss = upSlope >= 0;
+
+  // pnl(S) is piecewise-linear and kinks only at each leg's own strike, so
+  // evaluating exactly at the strikes (plus 0 and one point past the
+  // highest strike, where the upper tail's constant slope has already taken
+  // over) finds the true extrema and exact breakevens by interpolation —
+  // no sweep, no approximation, and no risk of missing a kink between samples.
+  const maxStrike = Math.max(...legs.map(l => l.strike));
+  const breakpoints = [...new Set([0, ...legs.map(l => l.strike), maxStrike + 1])].sort((a, b) => a - b);
+  const samples = breakpoints.map(S => ({ S, pnl: payoffAtExpiry(legs, S) + entryCash }));
+  let maxPnl = -Infinity, minPnl = Infinity;
+  for (const { pnl } of samples) { if (pnl > maxPnl) maxPnl = pnl; if (pnl < minPnl) minPnl = pnl; }
+
+  const breakevens = [];
+  for (let i = 1; i < samples.length; i++) {
+    const a = samples[i - 1].pnl, b = samples[i].pnl;
+    if ((a < 0 && b >= 0) || (a > 0 && b <= 0)) {
+      const t = a === b ? 0 : (0 - a) / (b - a);
+      breakevens.push(r2(samples[i - 1].S + (samples[i].S - samples[i - 1].S) * t));
+    }
+  }
+  return {
+    defined: definedLoss,
+    width: null,
+    max_profit: upSlope > 0 ? null : r2(maxPnl * MULT * u),
+    max_loss: definedLoss ? r2(-minPnl * MULT * u) : null,
+    breakevens: breakevens.length ? breakevens : null,
+  };
 }
 
 // Opening price of the structure from live quotes (per unit, positive number).
@@ -108,4 +167,4 @@ function roundToTick(symbol, price, dir = 'nearest') {
 function legKey(l) { return `${l.expiry}|${l.type}|${Number(l.strike)}`; }
 function r2(v) { return Math.round(v * 100) / 100 + 0; } // + 0 turns -0 into 0
 
-module.exports = { normLegs, units, sells, buys, riskProfile, openingPrice, mark, closingPrice, roundToTick, legKey, MULT, r2 };
+module.exports = { normLegs, units, sells, buys, riskProfile, payoffAtExpiry, openingPrice, mark, closingPrice, roundToTick, legKey, MULT, r2 };
