@@ -103,6 +103,25 @@ function checkShape(structure, legs, creditOrDebit) {
       want(legs.length === 1 && sc.length === 1, 'covered call: one short call');
       want(credit, 'covered call is a credit trade');
       break;
+    case 'butterfly': {
+      const callLegs = legs.filter(l => l.type === 'call'), putLegs = legs.filter(l => l.type === 'put');
+      want(legs.length === 4 && (callLegs.length === 4 || putLegs.length === 4), 'butterfly: all four legs the same type (all calls or all puts)');
+      if (!errors.length) {
+        const buysL = buys(legs), sellsL = sells(legs);
+        want(buysL.length === 2 && sellsL.length === 2, 'butterfly: two long wings, two short legs at the body');
+        if (!errors.length) {
+          const wings = buysL.map(l => l.strike).sort((a, b) => a - b);
+          const bodies = [...new Set(sellsL.map(l => l.strike))];
+          want(bodies.length === 1, 'butterfly: both short legs at the same (body) strike');
+          if (!errors.length) {
+            want(wings[0] < bodies[0] && bodies[0] < wings[1], 'butterfly: body strike must sit between the two wing strikes');
+            want(exp.size === 1, 'butterfly: all legs one expiry');
+          }
+        }
+      }
+      want(!credit, 'butterfly is a debit trade');
+      break;
+    }
     case 'custom':
       // No shape constraint beyond the universal 1–4 legs and matching-qty
       // checks above — this is the Build tab's freeform leg list. Risk is

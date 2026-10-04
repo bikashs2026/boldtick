@@ -833,6 +833,44 @@ test('api: Build tab — a custom structure\'s risk is computed, not assumed: a 
   assert.ok(r.data.idea.validation.errors.some(e => /undefined risk/.test(e.issue)));
 });
 
+test('api: Build tab — butterfly: priced like the textbook formula, must be symmetric around one body strike and debit', async t => {
+  const ctx = await startApp();
+  t.after(ctx.close);
+  // Long call butterfly: buy 7630, sell 7650 x2, buy 7670 — one strike (7650)
+  // sold twice, same pattern a real butterfly order ticket uses.
+  const legs = [
+    { action: 'buy', type: 'call', strike: 7630 }, { action: 'sell', type: 'call', strike: 7650 },
+    { action: 'sell', type: 'call', strike: 7650 }, { action: 'buy', type: 'call', strike: 7670 },
+  ];
+  const priced = await ctx.call('POST', '/paper/api/build/price', ctx.owner, { symbol: 'SPX', structure: 'butterfly', expiry: '2026-10-05', credit_or_debit: 'debit', legs });
+  assert.equal(priced.status, 200, JSON.stringify(priced.data));
+  assert.equal(priced.data.risk.defined, true);
+  assert.equal(priced.data.risk.breakevens.length, 2, 'a butterfly has two breakevens, one on each side of the body');
+  const debit = priced.data.entry.mid;
+  assert.ok(debit > 0 && debit < 20, 'a long butterfly is entered for a debit');
+  assert.equal(priced.data.risk.max_loss, Math.round(debit * 100 * 100) / 100, 'max loss is exactly the debit paid');
+  assert.equal(priced.data.risk.max_profit, Math.round((20 - debit) * 100 * 100) / 100, 'max profit is the wing width minus the debit');
+
+  const limit = roundToTick('SPX', debit, 'down');
+  const base = { symbol: 'SPX', structure: 'butterfly', expiry: '2026-10-05', legs, limit_price: limit, quantity: 1, thesis: 'test butterfly', destination: 'ideas' };
+
+  // A butterfly submitted as a credit is rejected — same direction rule as the named debit structures.
+  const asCredit = await ctx.call('POST', '/paper/api/build/submit', ctx.owner, { ...base, credit_or_debit: 'credit' });
+  assert.equal(asCredit.status, 422, JSON.stringify(asCredit.data));
+  assert.ok(asCredit.data.idea.validation.errors.some(e => /debit trade/.test(e.issue)));
+
+  // Mismatched body strikes (the two "sell" legs at different strikes) are rejected too.
+  const lopsided = legs.map((l, i) => (i === 2 ? { ...l, strike: 7655 } : l));
+  const badBody = await ctx.call('POST', '/paper/api/build/submit', ctx.owner, { ...base, credit_or_debit: 'debit', legs: lopsided });
+  assert.equal(badBody.status, 422, JSON.stringify(badBody.data));
+  assert.ok(badBody.data.idea.validation.errors.some(e => /same \(body\) strike/.test(e.issue)));
+
+  // The correct shape, as a debit, goes through to Trade Ideas.
+  const ok = await ctx.call('POST', '/paper/api/build/submit', ctx.owner, { ...base, credit_or_debit: 'debit' });
+  assert.equal(ok.status, 201, JSON.stringify(ok.data));
+  assert.equal(ok.data.idea.status, 'pending');
+});
+
 test('api: Build tab — templates (reusable shape) and drafts (concrete saved order)', async t => {
   const ctx = await startApp();
   t.after(ctx.close);

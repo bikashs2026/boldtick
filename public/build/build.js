@@ -66,6 +66,7 @@
   const STRUCTURE_SLOTS = {
     iron_condor:      { creditOrDebit: 'credit', legs: [{ action: 'buy', type: 'put' }, { action: 'sell', type: 'put' }, { action: 'sell', type: 'call' }, { action: 'buy', type: 'call' }] },
     bull_put_spread:  { creditOrDebit: 'credit', legs: [{ action: 'sell', type: 'put' }, { action: 'buy', type: 'put' }] },
+    butterfly:        { creditOrDebit: 'debit',  legs: [{ action: 'buy', type: 'call' }, { action: 'sell', type: 'call' }, { action: 'sell', type: 'call' }, { action: 'buy', type: 'call' }] },
     diagonal:         { creditOrDebit: 'debit',  legs: [{ action: 'sell', type: 'call' }, { action: 'buy', type: 'call' }], crossExpiry: true },
     calendar:         { creditOrDebit: 'debit',  legs: [{ action: 'sell', type: 'call' }, { action: 'buy', type: 'call' }], crossExpiry: true, lockedStrikeAndType: true },
     covered_strangle: { creditOrDebit: 'credit', legs: [{ action: 'sell', type: 'put' }, { action: 'sell', type: 'call' }] },
@@ -73,7 +74,7 @@
     custom:           { creditOrDebit: null, legs: null },
   };
   const STRUCTURE_LABELS = {
-    iron_condor: 'Iron condor', bull_put_spread: 'Bull put spread', diagonal: 'Diagonal',
+    iron_condor: 'Iron condor', bull_put_spread: 'Bull put spread', butterfly: 'Butterfly', diagonal: 'Diagonal',
     calendar: 'Calendar', covered_strangle: 'Covered strangle', covered_call: 'Covered call', custom: 'Custom',
   };
 
@@ -143,6 +144,18 @@
           { action: 'buy', type: 'put', strike: strikeSteps(front, 'put', sp, -6), expiry: frontExpiry },
         ];
       }
+      case 'butterfly': {
+        // Symmetric, ATM-centered — the body sells 2x the nearest listed
+        // strike to spot, wings buy 5 listed strikes out on each side.
+        const atm = nearestStrike(front, 'call', front.underlying);
+        const lowWing = strikeSteps(front, 'call', atm, -5), highWing = strikeSteps(front, 'call', atm, 5);
+        return [
+          { action: 'buy', type: 'call', strike: lowWing, expiry: frontExpiry },
+          { action: 'sell', type: 'call', strike: atm, expiry: frontExpiry },
+          { action: 'sell', type: 'call', strike: atm, expiry: frontExpiry },
+          { action: 'buy', type: 'call', strike: highWing, expiry: frontExpiry },
+        ];
+      }
       case 'covered_strangle':
         return [
           { action: 'sell', type: 'put', strike: nearestByDelta(front, 'put', 0.16), expiry: frontExpiry },
@@ -183,12 +196,14 @@
       const lockedStrikeAndType = slot.lockedStrikeAndType && i === 1;
       return `
         <tr data-i="${i}">
-          <td>${editable
-            ? `<div class="seg"><button type="button" class="side ${leg.action === 'buy' ? 'active buy' : ''}" data-side="buy">Buy</button><button type="button" class="side ${leg.action === 'sell' ? 'active sell' : ''}" data-side="sell">Sell</button></div>`
-            : `<span class="${leg.action === 'buy' ? 'good' : 'bad'}">${leg.action === 'buy' ? 'Buy' : 'Sell'}</span>`}</td>
-          <td>${(editable && !lockedStrikeAndType)
-            ? `<div class="seg"><button type="button" class="type ${leg.type === 'call' ? 'active call' : ''}" data-type="call">Call</button><button type="button" class="type ${leg.type === 'put' ? 'active put' : ''}" data-type="put">Put</button></div>`
-            : `<span>${leg.type === 'call' ? 'Call' : 'Put'}</span>`}</td>
+          <td><div class="seg${editable ? '' : ' readonly'}">
+            <button type="button" class="side ${leg.action === 'buy' ? 'active buy' : ''}" data-side="buy"${editable ? '' : ' disabled'}>Buy</button>
+            <button type="button" class="side ${leg.action === 'sell' ? 'active sell' : ''}" data-side="sell"${editable ? '' : ' disabled'}>Sell</button>
+          </div></td>
+          <td><div class="seg${(editable && !lockedStrikeAndType) ? '' : ' readonly'}">
+            <button type="button" class="type ${leg.type === 'call' ? 'active call' : ''}" data-type="call"${(editable && !lockedStrikeAndType) ? '' : ' disabled'}>Call</button>
+            <button type="button" class="type ${leg.type === 'put' ? 'active put' : ''}" data-type="put"${(editable && !lockedStrikeAndType) ? '' : ' disabled'}>Put</button>
+          </div></td>
           <td>${lockedStrikeAndType
             ? `<span class="mono">${leg.strike ?? '—'} (same as leg 1)</span>`
             : `<select class="strikeSel">${strikeOpts.map(s => `<option value="${s}" ${s === leg.strike ? 'selected' : ''}>${s}</option>`).join('')}</select>`}</td>

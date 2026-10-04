@@ -49,6 +49,11 @@ function riskProfile(structure, legs, price, creditOrDebit) {
       return { defined: false, covered: true, width: null, max_profit: r2(p * MULT * u), max_loss: null,
         assignment_risk: r2((sp.strike - p) * MULT * u), breakevens: null };
     }
+    case 'butterfly':
+      // A butterfly's payoff is just another piecewise-linear leg combination —
+      // genericRiskProfile's exact breakpoint analysis already gets max
+      // profit/loss and both breakevens right without a bespoke formula.
+      return genericRiskProfile(legs, p, creditOrDebit);
     case 'custom':
       return genericRiskProfile(legs, p, creditOrDebit);
     default:

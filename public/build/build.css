@@ -14,6 +14,11 @@ table.legs td, table.legs th { white-space: nowrap; }
 .seg button.active.sell { background: rgba(235,106,106,0.16); color: var(--bad); }
 .seg button.active.call { background: rgba(90,169,255,0.16); color: var(--call); }
 .seg button.active.put { background: rgba(240,138,75,0.16); color: var(--put); }
+/* Fixed structures still show the same pill — just not clickable, and the
+   side not in play fades out so only the active one reads at a glance. */
+.seg.readonly button { cursor: default; }
+.seg.readonly button:not(.active) { opacity: .35; }
+.seg.readonly button:hover { background: var(--panel-2); }
 .legs select.strikeSel, .legs select.expSel {
   height: 32px; padding: 0 8px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
   color: var(--text-hi); font-family: 'JetBrains Mono', monospace; font-size: 13px; min-width: 92px;
