@@ -319,15 +319,17 @@
 
   function creditOrDebitFor() { const cod = STRUCTURE_SLOTS[structure].creditOrDebit; return cod === null ? codOverride : cod; }
 
-  // custom/rsb show "Price is" but never let it be hand-picked — the server
-  // (naturalCreditOrDebit in pricing.js) is the only thing that gets to say
-  // which way those actually net, since guessing wrong silently flips the
-  // risk math. The field stays visible (so the real direction is shown) but
-  // disabled; fetchPrice() keeps it synced to the server's own answer.
+  // The "Price is" field above the Legs table never needs to be shown or
+  // hand-picked, for any structure: a fixed-direction structure's direction
+  // comes from STRUCTURE_SLOTS, and custom/rsb's comes from the server
+  // (naturalCreditOrDebit in pricing.js), which is resynced into codOverride
+  // on every fetchPrice() regardless of whether this field is visible — the
+  // Net credit/Net debit stat tile already shows whichever one it is. #codSel
+  // itself stays in the DOM (fetchPrice still writes codOverride into it) so
+  // nothing else has to change, it's just never displayed or editable.
   function updateCodField() {
-    const free = STRUCTURE_SLOTS[structure].creditOrDebit === null;
-    document.getElementById('codField').hidden = !free;
-    document.getElementById('codSel').disabled = free;
+    document.getElementById('codField').hidden = true;
+    document.getElementById('codSel').disabled = true;
   }
 
   async function fetchPrice() {
