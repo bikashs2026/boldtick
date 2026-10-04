@@ -29,6 +29,17 @@ table.legs td, table.legs th { white-space: nowrap; }
 .rmbtn:hover { color: var(--bad); }
 .addrow { margin-top: 12px; margin-right: 10px; }
 #legCapNote { font-size: 12px; }
+.legs input.qtyIn {
+  width: 52px; height: 32px; text-align: center; background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 6px; color: var(--text-hi); font-family: 'JetBrains Mono', monospace; font-size: 13px;
+}
+.legs td .mono[title] { color: var(--text-faint); font-style: italic; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; }
+
+/* net delta/theta readout */
+.netgreeks { display: flex; gap: 16px; }
+.stat.inline { padding: 0; background: transparent; border: 0; flex-direction: row; align-items: baseline; gap: 6px; }
+.stat.inline .l { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .06em; }
+.stat.inline .v { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text-hi); }
 
 /* stats */
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }

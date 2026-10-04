@@ -5,7 +5,7 @@
 // or merely warn carry a mode in `modes` ("block" | "warn" | "off").
 // Credentials, the broker host and account number are deliberately NOT here.
 
-const STRUCTURES = ['iron_condor', 'bull_put_spread', 'butterfly', 'diagonal', 'calendar', 'covered_strangle', 'covered_call', 'custom'];
+const STRUCTURES = ['iron_condor', 'bull_put_spread', 'butterfly', 'rsb', 'diagonal', 'calendar', 'covered_strangle', 'covered_call', 'custom'];
 const MODES = ['block', 'warn', 'off'];
 
 // type: number | int | bool | hm | hm_range | range | list | structures | enum | none

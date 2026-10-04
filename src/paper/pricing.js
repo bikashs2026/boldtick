@@ -1,7 +1,11 @@
 // src/paper/pricing.js — structure math: risk, live price, marks, P&L
 //
 // Prices are per share (a 1.20 credit = $120 per contract). "units" = how many
-// of the structure (every leg has the same quantity in all supported structures).
+// of the structure. Every leg has the same quantity in most structures —
+// the exception is butterfly, whose body is sold twice: units() there is the
+// wing qty, and the body leg's own qty (2x a wing's) is carried through as
+// its "weight" wherever a leg's dollar contribution is computed, rather than
+// assumed equal to every other leg's.
 
 const MULT = 100;
 
@@ -15,13 +19,22 @@ function normLegs(idea) {
   }));
 }
 
-const units = legs => (legs.length ? legs[0].qty : 0);
+// structure is optional — omitting it (or passing one with no special case
+// below) keeps the old, simple "every leg is one unit" behavior.
+function units(legs, structure) {
+  if (!legs.length) return 0;
+  if (structure === 'butterfly') {
+    const wing = buys(legs)[0];
+    return wing ? wing.qty : legs[0].qty;
+  }
+  return legs[0].qty;
+}
 const sells = (legs, type) => legs.filter(l => l.action === 'sell' && (!type || l.type === type));
 const buys  = (legs, type) => legs.filter(l => l.action === 'buy'  && (!type || l.type === type));
 
 // Risk for one structure at a given limit price. Returns $ totals for all units.
 function riskProfile(structure, legs, price, creditOrDebit) {
-  const u = units(legs);
+  const u = units(legs, structure);
   const p = Number(price);
   switch (structure) {
     case 'iron_condor': {
@@ -50,12 +63,14 @@ function riskProfile(structure, legs, price, creditOrDebit) {
         assignment_risk: r2((sp.strike - p) * MULT * u), breakevens: null };
     }
     case 'butterfly':
-      // A butterfly's payoff is just another piecewise-linear leg combination —
-      // genericRiskProfile's exact breakpoint analysis already gets max
-      // profit/loss and both breakevens right without a bespoke formula.
-      return genericRiskProfile(legs, p, creditOrDebit);
+    case 'rsb':
     case 'custom':
-      return genericRiskProfile(legs, p, creditOrDebit);
+      // A butterfly or RSB's payoff is just another piecewise-linear leg
+      // combination — genericRiskProfile's exact breakpoint analysis already
+      // gets max profit/loss and both breakevens right without a bespoke
+      // formula, and (via units() above) correctly weights a butterfly's
+      // doubled body leg rather than assuming every leg is one unit.
+      return genericRiskProfile(legs, p, creditOrDebit, structure);
     default:
       return { defined: false, width: null, max_profit: null, max_loss: null, breakevens: null };
   }
@@ -64,11 +79,15 @@ function riskProfile(structure, legs, price, creditOrDebit) {
 // Per-share payoff of a leg combination at expiration, for an arbitrary (not
 // necessarily named) structure — intrinsic value only, no entry price baked
 // in. Used by genericRiskProfile below and by the Build tab's P&L curve, so
-// both agree on the same math.
-function payoffAtExpiry(legs, S) {
+// both agree on the same math. u is "one unit" of the structure (see units()
+// above) — a leg whose own qty is a multiple of u (a butterfly's body,
+// sold twice) counts that many times its intrinsic value, instead of once
+// like every other leg.
+function payoffAtExpiry(legs, S, u = units(legs)) {
   return legs.reduce((sum, l) => {
     const intrinsic = l.type === 'call' ? Math.max(0, S - l.strike) : Math.max(0, l.strike - S);
-    return sum + (l.action === 'buy' ? intrinsic : -intrinsic);
+    const w = u ? l.qty / u : 1;
+    return sum + (l.action === 'buy' ? intrinsic : -intrinsic) * w;
   }, 0);
 }
 
@@ -81,13 +100,16 @@ function payoffAtExpiry(legs, S) {
 // (the underlying can't go negative), so the downside is always bounded by
 // the payoff at S=0; the upside is unbounded exactly when there are more
 // short calls than long calls (a naked/uncovered short call).
-function genericRiskProfile(legs, price, creditOrDebit) {
-  const u = units(legs);
+function genericRiskProfile(legs, price, creditOrDebit, structure) {
+  const u = units(legs, structure);
   const p = Number(price);
   const entryCash = creditOrDebit === 'debit' ? -p : p; // $ received (credit) per share at entry
 
   const callLegs = legs.filter(l => l.type === 'call');
-  const upSlope = callLegs.reduce((s, l) => s + (l.action === 'buy' ? 1 : -1), 0);
+  // Weighted by each leg's own qty relative to one unit, so a leg sold or
+  // bought more than once per unit (a butterfly's body) counts that many
+  // times toward whether the upper tail is covered.
+  const upSlope = callLegs.reduce((s, l) => s + (l.action === 'buy' ? 1 : -1) * (u ? l.qty / u : 1), 0);
   const definedLoss = upSlope >= 0;
 
   // pnl(S) is piecewise-linear and kinks only at each leg's own strike, so
@@ -97,7 +119,7 @@ function genericRiskProfile(legs, price, creditOrDebit) {
   // no sweep, no approximation, and no risk of missing a kink between samples.
   const maxStrike = Math.max(...legs.map(l => l.strike));
   const breakpoints = [...new Set([0, ...legs.map(l => l.strike), maxStrike + 1])].sort((a, b) => a - b);
-  const samples = breakpoints.map(S => ({ S, pnl: payoffAtExpiry(legs, S) + entryCash }));
+  const samples = breakpoints.map(S => ({ S, pnl: payoffAtExpiry(legs, S, u) + entryCash }));
   let maxPnl = -Infinity, minPnl = Infinity;
   for (const { pnl } of samples) { if (pnl > maxPnl) maxPnl = pnl; if (pnl < minPnl) minPnl = pnl; }
 
@@ -120,12 +142,12 @@ function genericRiskProfile(legs, price, creditOrDebit) {
 
 // Opening price of the structure from live quotes (per unit, positive number).
 // quotes: Map legKey -> { bid, ask, mid, delta }
-function openingPrice(legs, quotes, creditOrDebit) {
+function openingPrice(legs, quotes, creditOrDebit, structure) {
   let mid = 0, natural = 0;
   for (const l of legs) {
     const q = quotes.get(legKey(l));
     if (!q) return null;
-    const n = l.qty / units(legs);
+    const n = l.qty / units(legs, structure);
     if (l.action === 'sell') { mid += n * q.mid; natural += n * q.bid; }
     else { mid -= n * q.mid; natural -= n * q.ask; }
   }
@@ -136,16 +158,16 @@ function openingPrice(legs, quotes, creditOrDebit) {
 
 // Mark of an open position: value of the structure now (per unit, positive),
 // and P&L in dollars. entryPrice is per unit, positive.
-function mark(legs, quotes, creditOrDebit, entryPrice) {
+function mark(legs, quotes, creditOrDebit, entryPrice, structure) {
   let netMid = 0, netNat = 0; // value we'd receive by closing (long legs sold, short legs bought)
   for (const l of legs) {
     const q = quotes.get(legKey(l));
     if (!q || q.mid == null) return { stale: true };
-    const n = l.qty / units(legs);
+    const n = l.qty / units(legs, structure);
     if (l.action === 'buy') { netMid += n * q.mid; netNat += n * q.bid; }
     else { netMid -= n * q.mid; netNat -= n * q.ask; }
   }
-  const u = units(legs);
+  const u = units(legs, structure);
   const credit = creditOrDebit === 'credit';
   const entryNet = credit ? entryPrice : -entryPrice; // cash received per unit at entry
   return {

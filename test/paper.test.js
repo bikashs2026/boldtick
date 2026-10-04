@@ -14,7 +14,7 @@ const { Store } = require('../src/paper/store');
 const { Settings } = require('../src/paper/settings');
 const { FakeMarket, fromSchwabShape } = require('../src/paper/marketData');
 const { validateIdea, checkShape } = require('../src/paper/validate');
-const { riskProfile, mark, roundToTick, normLegs } = require('../src/paper/pricing');
+const { riskProfile, mark, roundToTick, normLegs, r2 } = require('../src/paper/pricing');
 const { evaluate } = require('../src/paper/engine');
 const { createPaperApp } = require('../src/paper/app');
 const { TastytradePaperBroker, fromTastyOrder, PAPER_HOST } = require('../src/paper/broker/tastytradePaper');
@@ -833,17 +833,18 @@ test('api: Build tab — a custom structure\'s risk is computed, not assumed: a 
   assert.ok(r.data.idea.validation.errors.some(e => /undefined risk/.test(e.issue)));
 });
 
-test('api: Build tab — butterfly: priced like the textbook formula, must be symmetric around one body strike and debit', async t => {
+test('api: Build tab — butterfly: 3 legs (body sold twice), priced like the textbook formula, debit only', async t => {
   const ctx = await startApp();
   t.after(ctx.close);
-  // Long call butterfly: buy 7630, sell 7650 x2, buy 7670 — one strike (7650)
-  // sold twice, same pattern a real butterfly order ticket uses.
+  // Long call butterfly: buy 7630 (qty 1), sell 7650 (qty 2, the body),
+  // buy 7670 (qty 1) — the real order-ticket shape, not 4 separate legs.
   const legs = [
-    { action: 'buy', type: 'call', strike: 7630 }, { action: 'sell', type: 'call', strike: 7650 },
-    { action: 'sell', type: 'call', strike: 7650 }, { action: 'buy', type: 'call', strike: 7670 },
+    { action: 'buy', type: 'call', strike: 7630, qty: 1 }, { action: 'sell', type: 'call', strike: 7650, qty: 2 },
+    { action: 'buy', type: 'call', strike: 7670, qty: 1 },
   ];
   const priced = await ctx.call('POST', '/paper/api/build/price', ctx.owner, { symbol: 'SPX', structure: 'butterfly', expiry: '2026-10-05', credit_or_debit: 'debit', legs });
   assert.equal(priced.status, 200, JSON.stringify(priced.data));
+  assert.equal(priced.data.legs.length, 3, 'three legs on the wire, not four');
   assert.equal(priced.data.risk.defined, true);
   assert.equal(priced.data.risk.breakevens.length, 2, 'a butterfly has two breakevens, one on each side of the body');
   const debit = priced.data.entry.mid;
@@ -851,22 +852,103 @@ test('api: Build tab — butterfly: priced like the textbook formula, must be sy
   assert.equal(priced.data.risk.max_loss, Math.round(debit * 100 * 100) / 100, 'max loss is exactly the debit paid');
   assert.equal(priced.data.risk.max_profit, Math.round((20 - debit) * 100 * 100) / 100, 'max profit is the wing width minus the debit');
 
+  // Scaling every leg by 3 (wings qty 3, body qty 6) scales every dollar
+  // figure by exactly 3 and leaves the per-share breakevens untouched.
+  const legsX3 = legs.map(l => ({ ...l, qty: l.qty * 3 }));
+  const pricedX3 = await ctx.call('POST', '/paper/api/build/price', ctx.owner, { symbol: 'SPX', structure: 'butterfly', expiry: '2026-10-05', credit_or_debit: 'debit', legs: legsX3 });
+  assert.equal(pricedX3.data.risk.max_loss, r2(priced.data.risk.max_loss * 3));
+  assert.equal(pricedX3.data.risk.max_profit, r2(priced.data.risk.max_profit * 3));
+  assert.deepEqual(pricedX3.data.risk.breakevens, priced.data.risk.breakevens);
+
   const limit = roundToTick('SPX', debit, 'down');
-  const base = { symbol: 'SPX', structure: 'butterfly', expiry: '2026-10-05', legs, limit_price: limit, quantity: 1, thesis: 'test butterfly', destination: 'ideas' };
+  const base = { symbol: 'SPX', structure: 'butterfly', expiry: '2026-10-05', legs, limit_price: limit, thesis: 'test butterfly', destination: 'ideas' };
 
   // A butterfly submitted as a credit is rejected — same direction rule as the named debit structures.
   const asCredit = await ctx.call('POST', '/paper/api/build/submit', ctx.owner, { ...base, credit_or_debit: 'credit' });
   assert.equal(asCredit.status, 422, JSON.stringify(asCredit.data));
   assert.ok(asCredit.data.idea.validation.errors.some(e => /debit trade/.test(e.issue)));
 
-  // Mismatched body strikes (the two "sell" legs at different strikes) are rejected too.
-  const lopsided = legs.map((l, i) => (i === 2 ? { ...l, strike: 7655 } : l));
-  const badBody = await ctx.call('POST', '/paper/api/build/submit', ctx.owner, { ...base, credit_or_debit: 'debit', legs: lopsided });
-  assert.equal(badBody.status, 422, JSON.stringify(badBody.data));
-  assert.ok(badBody.data.idea.validation.errors.some(e => /same \(body\) strike/.test(e.issue)));
+  // A body qty that isn't exactly double a wing's is rejected.
+  const badRatio = legs.map((l, i) => (i === 1 ? { ...l, qty: 3 } : l));
+  const badRatioRes = await ctx.call('POST', '/paper/api/build/submit', ctx.owner, { ...base, credit_or_debit: 'debit', legs: badRatio });
+  assert.equal(badRatioRes.status, 422, JSON.stringify(badRatioRes.data));
+  assert.ok(badRatioRes.data.idea.validation.errors.some(e => /double a wing/.test(e.issue)));
 
   // The correct shape, as a debit, goes through to Trade Ideas.
   const ok = await ctx.call('POST', '/paper/api/build/submit', ctx.owner, { ...base, credit_or_debit: 'debit' });
+  assert.equal(ok.status, 201, JSON.stringify(ok.data));
+  assert.equal(ok.data.idea.status, 'pending');
+});
+
+test('api: a filled butterfly keeps its 1-wing/2-body qty ratio through the order, the position and its mark', async t => {
+  const ctx = await startApp();
+  t.after(ctx.close);
+  const legs = [
+    { action: 'buy', type: 'call', strike: 7630, qty: 1 }, { action: 'sell', type: 'call', strike: 7650, qty: 2 },
+    { action: 'buy', type: 'call', strike: 7670, qty: 1 },
+  ];
+  const priced = await ctx.call('POST', '/paper/api/build/price', ctx.owner, { symbol: 'SPX', structure: 'butterfly', expiry: '2026-10-05', credit_or_debit: 'debit', legs });
+  // Rounding up (willing to pay slightly more) makes a debit limit marketable
+  // for an immediate fill — "down" (as the pricing-formula test above uses,
+  // to keep its max-loss assertion simple) would leave this one "working".
+  const limit = roundToTick('SPX', priced.data.entry.mid, 'up');
+  const submitted = await ctx.call('POST', '/paper/api/build/submit', ctx.owner, {
+    symbol: 'SPX', structure: 'butterfly', expiry: '2026-10-05', credit_or_debit: 'debit', legs,
+    limit_price: limit, thesis: 'ratio through to a position', destination: 'broker',
+  });
+  assert.equal(submitted.status, 202, JSON.stringify(submitted.data));
+  assert.equal(submitted.data.order.status, 'filled');
+  assert.equal(submitted.data.order.units, 1, '"units" is the wing qty, not the body\'s');
+
+  const positions = await ctx.call('GET', '/paper/api/positions', ctx.owner);
+  const pos = positions.data.find(p => p.id === submitted.data.order.position_id);
+  assert.ok(pos, 'the fill opened a position');
+  const wingLegs = pos.legs.filter(l => l.strike !== 7650), bodyLeg = pos.legs.find(l => l.strike === 7650);
+  assert.ok(wingLegs.every(l => l.qty === 1), 'wings kept their qty');
+  assert.equal(bodyLeg.qty, 2, "the body's qty is still double the wings', not collapsed to match them");
+  assert.equal(pos.max_loss, r2(limit * 100), 'a long butterfly\'s max loss is exactly the debit paid, at 1 unit');
+
+  // Mark-to-market re-derives each leg's qty from units × its own ratio too —
+  // if it instead forced every leg to the same qty, the mark's P&L would be
+  // computed against a butterfly that isn't the one actually filled.
+  await ctx.desk.engineTick();
+  const afterSync = await ctx.call('GET', `/paper/api/positions/${pos.id}`, ctx.owner);
+  assert.ok(afterSync.data.mark && !afterSync.data.mark.stale, 'marked successfully with the fake chain');
+});
+
+test('api: Build tab — RSB (Ratio Superbull): debit call spread + a short put, one expiry, qty uniform like any other structure', async t => {
+  const ctx = await startApp();
+  t.after(ctx.close);
+  const legs = [
+    { action: 'buy', type: 'call', strike: 7650 }, { action: 'sell', type: 'call', strike: 7670 },
+    { action: 'sell', type: 'put', strike: 7600 },
+  ];
+  // The net entry can land either side of zero — RSB has no fixed direction.
+  const priced = await ctx.call('POST', '/paper/api/build/price', ctx.owner, { symbol: 'SPX', structure: 'rsb', expiry: '2026-10-05', credit_or_debit: 'credit', legs });
+  assert.equal(priced.status, 200, JSON.stringify(priced.data));
+  assert.equal(priced.data.legs.length, 3);
+  assert.equal(priced.data.risk.defined, true, 'the call spread is balanced (no naked call), so risk stays defined');
+  assert.equal(priced.data.risk.breakevens.length, 1, 'one breakeven, below the short put strike');
+
+  // The short put's theoretical worst case (underlying at 0) is enormous for
+  // SPX, same as any naked short put would be — raise the per-trade cap so
+  // that's what's being tested here, not the default limit.
+  await ctx.call('PUT', '/paper/api/settings', ctx.owner, { version: 1, values: { 'risk.max_loss_per_trade': 1_000_000, 'risk.max_total_open_risk': 1_000_000 } });
+  const limit = roundToTick('SPX', Math.abs(priced.data.entry.mid), 'down');
+  const base = { symbol: 'SPX', structure: 'rsb', expiry: '2026-10-05', legs, limit_price: limit, quantity: 1, thesis: 'test rsb', destination: 'ideas' };
+
+  // A fourth leg, or a second put, is rejected — RSB is exactly these three.
+  const extraLeg = await ctx.call('POST', '/paper/api/build/submit', ctx.owner, { ...base, credit_or_debit: 'credit', legs: [...legs, { action: 'buy', type: 'put', strike: 7590 }] });
+  assert.equal(extraLeg.status, 422, JSON.stringify(extraLeg.data));
+  assert.ok(extraLeg.data.idea.validation.errors.some(e => /buy call, sell call, sell put/.test(e.issue)));
+
+  // The call spread must be a debit spread (long strike below short strike) — reversed here.
+  const reversed = legs.map((l, i) => (i < 2 ? { ...l, strike: l.strike === 7650 ? 7670 : 7650 } : l));
+  const badSpread = await ctx.call('POST', '/paper/api/build/submit', ctx.owner, { ...base, credit_or_debit: 'credit', legs: reversed });
+  assert.equal(badSpread.status, 422, JSON.stringify(badSpread.data));
+  assert.ok(badSpread.data.idea.validation.errors.some(e => /must be a debit spread/.test(e.issue)));
+
+  const ok = await ctx.call('POST', '/paper/api/build/submit', ctx.owner, { ...base, credit_or_debit: 'credit' });
   assert.equal(ok.status, 201, JSON.stringify(ok.data));
   assert.equal(ok.data.idea.status, 'pending');
 });

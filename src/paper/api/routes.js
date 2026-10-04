@@ -136,11 +136,13 @@ function makeRouter({ desk, settings, events, store, auth, market, clock }) {
     const symbol = String(b.symbol || '').toUpperCase().replace(/^\$/, '');
     if (!symbol) throw new DeskError(400, 'bad_request', 'symbol is required');
     if (!Array.isArray(b.legs) || !b.legs.length || b.legs.length > 4) throw new DeskError(400, 'bad_request', '1–4 legs required');
-    // Preview legs all share one qty (the builder's own "Contracts" field, or
-    // 1 while that's still unset) — every structure requires matching qty
-    // across its legs, and this is what scales max profit/loss to real $.
-    const qty = Number.isInteger(Number(b.quantity)) && Number(b.quantity) >= 1 ? Number(b.quantity) : 1;
-    const legs = normLegs({ legs: b.legs.map(l => ({ ...l, qty })), expiry: b.expiry });
+    // Each leg carries its own qty now (the Legs section, not one global
+    // "Contracts" field) — most structures keep every leg equal, but a
+    // butterfly's body is legitimately double a wing's. A leg missing its
+    // own qty falls back to the top-level "quantity" convenience field, then 1.
+    const fallbackQty = Number.isInteger(Number(b.quantity)) && Number(b.quantity) >= 1 ? Number(b.quantity) : 1;
+    const legQty = l => Number.isInteger(Number(l.qty)) && Number(l.qty) >= 1 ? Number(l.qty) : fallbackQty;
+    const legs = normLegs({ legs: b.legs.map(l => ({ ...l, qty: legQty(l) })), expiry: b.expiry });
     const expiries = [...new Set(legs.map(l => l.expiry))].sort();
     const lo = Math.min(...legs.map(l => l.strike)), hi = Math.max(...legs.map(l => l.strike));
     const quotes = new Map();
@@ -153,7 +155,7 @@ function makeRouter({ desk, settings, events, store, auth, market, clock }) {
     const missing = legs.filter(l => !quotes.has(legKey(l)));
     if (missing.length) throw new DeskError(422, 'validation_failed', 'Some legs are not listed.', missing.map(l => ({ field: 'legs', issue: `${l.type} ${l.strike} is not listed for ${l.expiry}` })));
     const creditOrDebit = b.credit_or_debit === 'debit' ? 'debit' : 'credit';
-    const entry = openingPrice(legs, quotes, creditOrDebit);
+    const entry = openingPrice(legs, quotes, creditOrDebit, b.structure);
     const risk = b.structure ? riskProfile(b.structure, legs, entry ? entry.mid : 0, creditOrDebit) : null;
     const lastExpiry = expiries[expiries.length - 1];
     const dte = Math.round((Date.parse(lastExpiry) - Date.parse(clock.today())) / 86_400_000);
@@ -175,13 +177,18 @@ function makeRouter({ desk, settings, events, store, auth, market, clock }) {
   r.post('/build/submit', ownerOnly, h(async req => {
     const b = req.body || {};
     const destination = b.destination === 'broker' ? 'broker' : 'ideas';
-    const qty = Number(b.quantity);
-    if (!Number.isInteger(qty) || qty < 1) throw new DeskError(400, 'bad_request', 'quantity must be a whole number ≥ 1');
     if (!Array.isArray(b.legs) || !b.legs.length || b.legs.length > 4) throw new DeskError(400, 'bad_request', '1–4 legs required');
+    // Each leg carries its own qty (see /build/price's comment) — a leg
+    // missing it falls back to the top-level "quantity" field, then 1.
+    const fallbackQty = Number.isInteger(Number(b.quantity)) && Number(b.quantity) >= 1 ? Number(b.quantity) : null;
+    if (!b.legs.every(l => Number.isInteger(Number(l.qty)) && Number(l.qty) >= 1) && !fallbackQty) {
+      throw new DeskError(400, 'bad_request', 'quantity must be a whole number ≥ 1');
+    }
+    const legQty = l => (Number.isInteger(Number(l.qty)) && Number(l.qty) >= 1 ? Number(l.qty) : fallbackQty);
     const ideaBody = {
       client_idea_id: `build-${clock.now()}-${Math.random().toString(36).slice(2, 8)}`,
       symbol: b.symbol, structure: b.structure, expiry: b.expiry,
-      legs: b.legs.map(l => ({ action: l.action, type: l.type, strike: Number(l.strike), qty, expiry: l.expiry || b.expiry })),
+      legs: b.legs.map(l => ({ action: l.action, type: l.type, strike: Number(l.strike), qty: legQty(l), expiry: l.expiry || b.expiry })),
       limit_price: Number(b.limit_price),
       credit_or_debit: b.credit_or_debit === 'debit' ? 'debit' : 'credit',
       thesis: (typeof b.thesis === 'string' && b.thesis.trim()) ? b.thesis.trim() : 'Built manually on the Build tab.',

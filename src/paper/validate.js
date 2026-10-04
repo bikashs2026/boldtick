@@ -52,7 +52,9 @@ function checkShape(structure, legs, creditOrDebit) {
   const errors = [];
   const e = issue => errors.push({ field: 'legs', issue });
   const exp = new Set(legs.map(l => l.expiry));
-  if (new Set(legs.map(l => l.qty)).size > 1) e('every leg must have the same qty');
+  // Every structure's legs carry the same qty, except butterfly: its body
+  // (sold twice) is checked against its own wing-qty relationship below.
+  if (structure !== 'butterfly' && new Set(legs.map(l => l.qty)).size > 1) e('every leg must have the same qty');
   const sp = sells(legs, 'put'), bp = buys(legs, 'put'), sc = sells(legs, 'call'), bc = buys(legs, 'call');
   const want = (cond, msg) => { if (!cond) e(msg); };
   const credit = creditOrDebit === 'credit';
@@ -104,24 +106,36 @@ function checkShape(structure, legs, creditOrDebit) {
       want(credit, 'covered call is a credit trade');
       break;
     case 'butterfly': {
+      // The real order ticket: one body strike sold twice, two wings bought
+      // once each — 3 legs, not 4, with the body's qty exactly double a wing's.
       const callLegs = legs.filter(l => l.type === 'call'), putLegs = legs.filter(l => l.type === 'put');
-      want(legs.length === 4 && (callLegs.length === 4 || putLegs.length === 4), 'butterfly: all four legs the same type (all calls or all puts)');
+      want(legs.length === 3 && (callLegs.length === 3 || putLegs.length === 3), 'butterfly: all three legs the same type (all calls or all puts)');
       if (!errors.length) {
         const buysL = buys(legs), sellsL = sells(legs);
-        want(buysL.length === 2 && sellsL.length === 2, 'butterfly: two long wings, two short legs at the body');
+        want(buysL.length === 2 && sellsL.length === 1, 'butterfly: two long wings, one short body leg');
         if (!errors.length) {
+          want(buysL[0].qty === buysL[1].qty, 'butterfly: both wings must have the same qty');
+          want(sellsL[0].qty === buysL[0].qty * 2, 'butterfly: the body qty must be exactly double a wing\'s qty');
           const wings = buysL.map(l => l.strike).sort((a, b) => a - b);
-          const bodies = [...new Set(sellsL.map(l => l.strike))];
-          want(bodies.length === 1, 'butterfly: both short legs at the same (body) strike');
-          if (!errors.length) {
-            want(wings[0] < bodies[0] && bodies[0] < wings[1], 'butterfly: body strike must sit between the two wing strikes');
-            want(exp.size === 1, 'butterfly: all legs one expiry');
-          }
+          const body = sellsL[0].strike;
+          want(wings[0] < body && body < wings[1], 'butterfly: body strike must sit between the two wing strikes');
+          want(exp.size === 1, 'butterfly: all legs one expiry');
         }
       }
       want(!credit, 'butterfly is a debit trade');
       break;
     }
+    case 'rsb':
+      // Ratio Superbull: a debit call spread (buy lower strike, sell higher
+      // strike) plus a short put, all one expiry — the put's net cash flow
+      // can swing the whole trade either way, so no fixed credit/debit
+      // direction is enforced (unlike the single-direction structures above).
+      want(legs.length === 3 && bc.length === 1 && sc.length === 1 && sp.length === 1 && bp.length === 0, 'RSB: buy call, sell call, sell put');
+      if (!errors.length) {
+        want(bc[0].strike < sc[0].strike, 'RSB: the call spread must be a debit spread (long strike below short strike)');
+        want(exp.size === 1, 'RSB: all three legs one expiry');
+      }
+      break;
     case 'custom':
       // No shape constraint beyond the universal 1–4 legs and matching-qty
       // checks above — this is the Build tab's freeform leg list. Risk is
@@ -144,14 +158,20 @@ async function validateIdea(idea, ctx) {
   if (schema.length) { out.errors = schema; return out; }
 
   let legs = normLegs(idea);
-  if (ctx.overrideUnits) legs = legs.map(l => ({ ...l, qty: ctx.overrideUnits }));
+  if (ctx.overrideUnits) {
+    // Rescale every leg to the owner's chosen quantity-at-approve, keeping
+    // each leg's qty *ratio* to the others intact — a plain reassignment
+    // to one shared number would wreck a butterfly's 1-wing/2-body pattern.
+    const baseUnits = units(legs, idea.structure);
+    legs = legs.map(l => ({ ...l, qty: baseUnits ? Math.round(ctx.overrideUnits * (l.qty / baseUnits)) : ctx.overrideUnits }));
+  }
   out.legs = legs;
   const shape = checkShape(idea.structure, legs, idea.credit_or_debit);
   if (shape.length) { out.errors = shape; return out; }
 
   const symbol = idea.symbol.toUpperCase().replace(/^\$/, '');
   const price = Number(ctx.overridePrice ?? idea.limit_price);
-  const u = units(legs);
+  const u = units(legs, idea.structure);
 
   // Exchange tick size: SPX/SPXW/XSP trade in $0.05 increments under $3 and
   // $0.10 at/above $3; everything else in $0.01. An off-tick limit (Muse's
@@ -237,7 +257,7 @@ async function validateIdea(idea, ctx) {
         const c = out.contracts.get(legKey(l));
         out.quotes.set(legKey(l), c);
       }
-      const live = openingPrice(legs, out.quotes, idea.credit_or_debit);
+      const live = openingPrice(legs, out.quotes, idea.credit_or_debit, idea.structure);
       priced = live && live.mid > 0;
       if (live) {
         out.computed.live_mid = live.mid;

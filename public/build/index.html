@@ -27,12 +27,12 @@
   <section class="panel">
     <div class="controls">
       <div class="field"><label for="symIn">Symbol</label><input id="symIn" class="sym" value="SPX" autocomplete="off"></div>
-      <div class="field"><label for="expSel">Expiry</label><select id="expSel"></select></div>
       <div class="field"><label for="tplSel">Structure</label>
         <select id="tplSel">
           <option value="iron_condor">Iron condor</option>
           <option value="bull_put_spread">Bull put spread</option>
           <option value="butterfly">Butterfly</option>
+          <option value="rsb">RSB (Ratio Superbull)</option>
           <option value="diagonal">Diagonal (call)</option>
           <option value="calendar">Calendar</option>
           <option value="covered_strangle">Covered strangle</option>
@@ -53,9 +53,14 @@
     <div class="panel-head">
       <h2>Legs</h2>
       <span class="note" id="legsNote">Strikes load from the live chain</span>
+      <div class="spacer"></div>
+      <div class="netgreeks">
+        <span class="stat inline"><span class="l">Net delta</span><span class="v mono" id="netDelta">—</span></span>
+        <span class="stat inline"><span class="l">Net theta</span><span class="v mono" id="netTheta">—</span></span>
+      </div>
     </div>
     <table class="gridtable legs">
-      <thead><tr><th>Side</th><th>Type</th><th>Strike</th><th>Expiry</th><th>Bid</th><th>Ask</th><th>Mid</th><th>Delta</th><th></th></tr></thead>
+      <thead><tr><th>Side</th><th>Type</th><th>Strike</th><th>Expiry</th><th>Qty</th><th>Bid</th><th>Ask</th><th>Mid</th><th>Delta</th><th></th></tr></thead>
       <tbody id="legsBody"></tbody>
     </table>
     <button type="button" class="btn small addrow" id="btnAddLeg">+ Add leg</button>
@@ -97,7 +102,6 @@
         <span class="dest-label" id="lblBroker">Direct to broker</span>
       </div>
       <div class="spacer"></div>
-      <div class="qtyfield"><label for="contractsIn">Contracts</label><input id="contractsIn" type="number" min="1" value="1"></div>
       <button type="button" class="btn ghost" id="btnSaveDraft">Save for later</button>
       <button type="button" class="btn ghost" id="btnSaveTemplate">Save as template</button>
       <button type="button" class="btn primary" id="btnSubmit">Add to Trade Ideas</button>

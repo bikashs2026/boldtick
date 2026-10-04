@@ -184,8 +184,13 @@ class PaperDesk {
       }
       price = roundToTick(idea.symbol, price);
 
-      const legs = v.legs.map(l => ({ ...l, occ: v.contracts.get(legKey(l)).occ }));
-      const u = unitsOf(legs);
+      const u = unitsOf(v.legs, idea.structure);
+      // qty_ratio carries each leg's qty relative to one unit through the
+      // order (and from there, the position) — the order itself only stores
+      // a single "units" scalar, so without this a butterfly's doubled body
+      // leg would collapse back to the same qty as its wings on every
+      // mark-to-market or re-fill.
+      const legs = v.legs.map(l => ({ ...l, occ: v.contracts.get(legKey(l)).occ, qty_ratio: u ? r2(l.qty / u) : 1 }));
       const orderReq = {
         externalId: idea.id,
         legs: legs.map(l => ({ occSymbol: l.occ, side: l.action === 'sell' ? 'STO' : 'BTO', quantity: l.qty, meta: { symbol: idea.symbol, expiry: l.expiry, type: l.type, strike: l.strike } })),
@@ -231,7 +236,7 @@ class PaperDesk {
       position_id: position ? position.id : null,
       symbol: idea ? idea.symbol : position.symbol,
       structure: idea ? idea.structure : position.structure,
-      legs: legs.map(l => ({ action: kind === 'close' ? (l.action === 'sell' ? 'buy' : 'sell') : l.action, type: l.type, strike: l.strike, expiry: l.expiry, occ: l.occ })),
+      legs: legs.map(l => ({ action: kind === 'close' ? (l.action === 'sell' ? 'buy' : 'sell') : l.action, type: l.type, strike: l.strike, expiry: l.expiry, occ: l.occ, qty_ratio: l.qty_ratio ?? 1 })),
       units,
       limit_price: price,
       price_effect: priceEffect,
@@ -282,7 +287,7 @@ class PaperDesk {
     if (order.kind === 'entry') {
       const idea = this.ideas.find(i => i.id === order.idea_id);
       let pos = order.position_id && this.positions.find(p => p.id === order.position_id);
-      const legs = order.legs.map(l => ({ ...l, qty: order.filled_quantity }));
+      const legs = order.legs.map(l => ({ ...l, qty: order.filled_quantity * (l.qty_ratio ?? 1) }));
       const risk = riskProfile(order.structure, legs, order.avg_fill_price ?? order.limit_price, order.price_effect);
       if (!pos) {
         const at = this.nowIso();
@@ -428,13 +433,13 @@ class PaperDesk {
       const closingEffect = pos.credit_or_debit === 'credit' ? 'debit' : 'credit';
       price = roundToTick(pos.symbol, Math.max(price, 0.01), mode === 'limit' ? 'nearest' : closingEffect === 'debit' ? 'up' : 'down');
 
-      const legs = pos.legs.map(l => ({ ...l, qty: pos.units }));
+      const legs = pos.legs.map(l => ({ ...l, qty: pos.units * (l.qty_ratio ?? 1) }));
       const order = this._newOrder({ kind: 'close', position: pos, legs, units: pos.units, price, priceEffect: pos.credit_or_debit === 'credit' ? 'debit' : 'credit', priceMode: mode });
       const entryOrder = this.orders.find(o => o.id === pos.order_id);
       const orderReq = {
         externalId: order.id,
         mirrorAfter: entryOrder ? entryOrder.external_id || entryOrder.idea_id : null,
-        legs: pos.legs.map(l => ({ occSymbol: l.occ, side: l.action === 'sell' ? 'BTC' : 'STC', quantity: pos.units, meta: { symbol: pos.symbol, expiry: l.expiry, type: l.type, strike: l.strike } })),
+        legs: pos.legs.map(l => ({ occSymbol: l.occ, side: l.action === 'sell' ? 'BTC' : 'STC', quantity: pos.units * (l.qty_ratio ?? 1), meta: { symbol: pos.symbol, expiry: l.expiry, type: l.type, strike: l.strike } })),
         limitPrice: price,
         priceEffect: order.price_effect,
         timeInForce: 'Day',
@@ -534,7 +539,7 @@ class PaperDesk {
     const at = this.nowIso();
     for (const p of list) {
       const q = new Map(p.legs.map(l => [legKey(l), quotes.get(`${p.symbol}|${legKey(l)}`)]).filter(([, v]) => v));
-      const m = mark(p.legs.map(l => ({ ...l, qty: p.units })), q, p.credit_or_debit, p.entry_price);
+      const m = mark(p.legs.map(l => ({ ...l, qty: p.units * (l.qty_ratio ?? 1) })), q, p.credit_or_debit, p.entry_price, p.structure);
       m.underlying = underlying.get(p.symbol) ?? p.mark?.underlying ?? null;
       m.at = at;
       if (m.stale) m.error = errors.get(p.symbol) || 'missing quote for a leg';
@@ -708,7 +713,7 @@ class PaperDesk {
     const open = this.positions.filter(p => p.status !== 'closed').map(p => ({ symbol: p.symbol, max_loss: p.max_loss, defined: p.defined }));
     // Working entry orders count as exposure too.
     for (const o of this.orders.filter(x => x.kind === 'entry' && ['submitting', 'working', 'received'].includes(x.status) && !x.position_id)) {
-      const r = riskProfile(o.structure, o.legs.map(l => ({ ...l, qty: o.units })), o.limit_price, o.price_effect);
+      const r = riskProfile(o.structure, o.legs.map(l => ({ ...l, qty: o.units * (l.qty_ratio ?? 1) })), o.limit_price, o.price_effect);
       open.push({ symbol: o.symbol, max_loss: r.max_loss, defined: r.defined });
     }
     return {
@@ -772,7 +777,7 @@ class PaperDesk {
     const missing = legs.filter(l => !quotes.has(legKey(l)));
     if (missing.length) throw new DeskError(422, 'validation_failed', 'Some legs are not listed.', missing.map(l => ({ field: 'legs', issue: `${l.type} ${l.strike} not listed for ${l.expiry}` })));
     const cod = body.credit_or_debit === 'debit' ? 'debit' : 'credit';
-    const live = openingPrice(legs, quotes, cod);
+    const live = openingPrice(legs, quotes, cod, body.structure);
     const risk = body.structure ? riskProfile(body.structure, legs, live.mid, cod) : null;
     return {
       symbol, underlying, credit_or_debit: cod, mid: live.mid, natural: live.natural, risk_at_mid: risk,
@@ -801,7 +806,7 @@ class PaperDesk {
       symbol: String(body.symbol || '').toUpperCase().replace(/^\$/, ''),
       structure: body.structure,
       credit_or_debit: body.credit_or_debit === 'debit' ? 'debit' : 'credit',
-      legs: body.legs.map(l => ({ action: l.action === 'buy' ? 'buy' : 'sell', type: l.type === 'put' ? 'put' : 'call', strike_offset: r2(Number(l.strike) - underlying) })),
+      legs: body.legs.map(l => ({ action: l.action === 'buy' ? 'buy' : 'sell', type: l.type === 'put' ? 'put' : 'call', strike_offset: r2(Number(l.strike) - underlying), qty: Number.isInteger(Number(l.qty)) && Number(l.qty) >= 1 ? Number(l.qty) : 1 })),
       created_at: this.nowIso(),
     };
     this.templates.push(template);
@@ -827,7 +832,7 @@ class PaperDesk {
       symbol: String(body.symbol || '').toUpperCase().replace(/^\$/, ''),
       structure: body.structure,
       expiry: body.expiry,
-      legs: body.legs.map(l => ({ action: l.action === 'buy' ? 'buy' : 'sell', type: l.type === 'put' ? 'put' : 'call', strike: Number(l.strike), expiry: l.expiry || body.expiry })),
+      legs: body.legs.map(l => ({ action: l.action === 'buy' ? 'buy' : 'sell', type: l.type === 'put' ? 'put' : 'call', strike: Number(l.strike), expiry: l.expiry || body.expiry, qty: Number.isInteger(Number(l.qty)) && Number(l.qty) >= 1 ? Number(l.qty) : 1 })),
       credit_or_debit: body.credit_or_debit === 'debit' ? 'debit' : 'credit',
       limit_price: numOrNull(body.limit_price),
       quantity: Number.isInteger(Number(body.quantity)) && Number(body.quantity) >= 1 ? Number(body.quantity) : 1,

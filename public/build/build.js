@@ -46,10 +46,11 @@
     const d1 = (Math.log(S / K) + (r + sigma * sigma / 2) * T) / sd, d2 = d1 - sd;
     return type === 'call' ? S * normCDF(d1) - K * Math.exp(-r * T) * normCDF(d2) : K * Math.exp(-r * T) * normCDF(-d2) - S * normCDF(-d1);
   }
-  function payoffAtExpiry(legs, S) {
+  function payoffAtExpiry(legs, S, u) {
     return legs.reduce((sum, l) => {
       const intrinsic = l.type === 'call' ? Math.max(0, S - l.strike) : Math.max(0, l.strike - S);
-      return sum + (l.action === 'buy' ? intrinsic : -intrinsic);
+      const w = u ? l.qty / u : 1;
+      return sum + (l.action === 'buy' ? intrinsic : -intrinsic) * w;
     }, 0);
   }
 
@@ -66,17 +67,26 @@
   const STRUCTURE_SLOTS = {
     iron_condor:      { creditOrDebit: 'credit', legs: [{ action: 'buy', type: 'put' }, { action: 'sell', type: 'put' }, { action: 'sell', type: 'call' }, { action: 'buy', type: 'call' }] },
     bull_put_spread:  { creditOrDebit: 'credit', legs: [{ action: 'sell', type: 'put' }, { action: 'buy', type: 'put' }] },
-    butterfly:        { creditOrDebit: 'debit',  legs: [{ action: 'buy', type: 'call' }, { action: 'sell', type: 'call' }, { action: 'sell', type: 'call' }, { action: 'buy', type: 'call' }] },
+    butterfly:        { creditOrDebit: 'debit',  legs: [{ action: 'buy', type: 'call' }, { action: 'sell', type: 'call' }, { action: 'buy', type: 'call' }], lockedBodyQty: 1 },
+    rsb:              { creditOrDebit: null,     legs: [{ action: 'buy', type: 'call' }, { action: 'sell', type: 'call' }, { action: 'sell', type: 'put' }] },
     diagonal:         { creditOrDebit: 'debit',  legs: [{ action: 'sell', type: 'call' }, { action: 'buy', type: 'call' }], crossExpiry: true },
     calendar:         { creditOrDebit: 'debit',  legs: [{ action: 'sell', type: 'call' }, { action: 'buy', type: 'call' }], crossExpiry: true, lockedStrikeAndType: true },
     covered_strangle: { creditOrDebit: 'credit', legs: [{ action: 'sell', type: 'put' }, { action: 'sell', type: 'call' }] },
     covered_call:     { creditOrDebit: 'credit', legs: [{ action: 'sell', type: 'call' }] },
-    custom:           { creditOrDebit: null, legs: null },
+    custom:           { creditOrDebit: null, legs: null, crossExpiry: true },
   };
   const STRUCTURE_LABELS = {
-    iron_condor: 'Iron condor', bull_put_spread: 'Bull put spread', butterfly: 'Butterfly', diagonal: 'Diagonal',
+    iron_condor: 'Iron condor', bull_put_spread: 'Bull put spread', butterfly: 'Butterfly', rsb: 'RSB (Ratio Superbull)', diagonal: 'Diagonal',
     calendar: 'Calendar', covered_strangle: 'Covered strangle', covered_call: 'Covered call', custom: 'Custom',
   };
+  // Representative "unit" qty for a structure's legs — mirrors
+  // src/paper/pricing.js's units(): the wing's qty for a butterfly (its body
+  // is always double that), the first leg's qty for everything else.
+  function unitsOf(ls, struct) {
+    if (!ls.length) return 1;
+    if (struct === 'butterfly') { const wing = ls.find(l => l.action === 'buy'); return wing ? wing.qty : ls[0].qty; }
+    return ls[0].qty;
+  }
 
   // ── state ──
   let symbol = (localStorage.getItem('build.symbol') || 'SPX').toUpperCase();
@@ -131,49 +141,59 @@
       case 'iron_condor': {
         const sp = nearestByDelta(front, 'put', 0.16), sc = nearestByDelta(front, 'call', 0.16);
         return [
-          { action: 'buy', type: 'put', strike: strikeSteps(front, 'put', sp, -6), expiry: frontExpiry },
-          { action: 'sell', type: 'put', strike: sp, expiry: frontExpiry },
-          { action: 'sell', type: 'call', strike: sc, expiry: frontExpiry },
-          { action: 'buy', type: 'call', strike: strikeSteps(front, 'call', sc, 6), expiry: frontExpiry },
+          { action: 'buy', type: 'put', strike: strikeSteps(front, 'put', sp, -6), expiry: frontExpiry, qty: 1 },
+          { action: 'sell', type: 'put', strike: sp, expiry: frontExpiry, qty: 1 },
+          { action: 'sell', type: 'call', strike: sc, expiry: frontExpiry, qty: 1 },
+          { action: 'buy', type: 'call', strike: strikeSteps(front, 'call', sc, 6), expiry: frontExpiry, qty: 1 },
         ];
       }
       case 'bull_put_spread': {
         const sp = nearestByDelta(front, 'put', 0.16);
         return [
-          { action: 'sell', type: 'put', strike: sp, expiry: frontExpiry },
-          { action: 'buy', type: 'put', strike: strikeSteps(front, 'put', sp, -6), expiry: frontExpiry },
+          { action: 'sell', type: 'put', strike: sp, expiry: frontExpiry, qty: 1 },
+          { action: 'buy', type: 'put', strike: strikeSteps(front, 'put', sp, -6), expiry: frontExpiry, qty: 1 },
         ];
       }
       case 'butterfly': {
-        // Symmetric, ATM-centered — the body sells 2x the nearest listed
-        // strike to spot, wings buy 5 listed strikes out on each side.
+        // Symmetric, ATM-centered, 3 legs — two long wings (qty 1 each) and
+        // one short body (qty 2) sitting between them.
         const atm = nearestStrike(front, 'call', front.underlying);
         const lowWing = strikeSteps(front, 'call', atm, -5), highWing = strikeSteps(front, 'call', atm, 5);
         return [
-          { action: 'buy', type: 'call', strike: lowWing, expiry: frontExpiry },
-          { action: 'sell', type: 'call', strike: atm, expiry: frontExpiry },
-          { action: 'sell', type: 'call', strike: atm, expiry: frontExpiry },
-          { action: 'buy', type: 'call', strike: highWing, expiry: frontExpiry },
+          { action: 'buy', type: 'call', strike: lowWing, expiry: frontExpiry, qty: 1 },
+          { action: 'sell', type: 'call', strike: atm, expiry: frontExpiry, qty: 2 },
+          { action: 'buy', type: 'call', strike: highWing, expiry: frontExpiry, qty: 1 },
+        ];
+      }
+      case 'rsb': {
+        // Debit call spread (buy lower / sell higher) + a short put, all one
+        // expiry, qty uniform across the three legs like any other structure.
+        let lc = nearestByDelta(front, 'call', 0.35), hc = nearestByDelta(front, 'call', 0.16);
+        if (lc >= hc) hc = strikeSteps(front, 'call', lc, 1);
+        return [
+          { action: 'buy', type: 'call', strike: lc, expiry: frontExpiry, qty: 1 },
+          { action: 'sell', type: 'call', strike: hc, expiry: frontExpiry, qty: 1 },
+          { action: 'sell', type: 'put', strike: nearestByDelta(front, 'put', 0.16), expiry: frontExpiry, qty: 1 },
         ];
       }
       case 'covered_strangle':
         return [
-          { action: 'sell', type: 'put', strike: nearestByDelta(front, 'put', 0.16), expiry: frontExpiry },
-          { action: 'sell', type: 'call', strike: nearestByDelta(front, 'call', 0.16), expiry: frontExpiry },
+          { action: 'sell', type: 'put', strike: nearestByDelta(front, 'put', 0.16), expiry: frontExpiry, qty: 1 },
+          { action: 'sell', type: 'call', strike: nearestByDelta(front, 'call', 0.16), expiry: frontExpiry, qty: 1 },
         ];
       case 'covered_call':
-        return [{ action: 'sell', type: 'call', strike: nearestByDelta(front, 'call', 0.2), expiry: frontExpiry }];
+        return [{ action: 'sell', type: 'call', strike: nearestByDelta(front, 'call', 0.2), expiry: frontExpiry, qty: 1 }];
       case 'diagonal':
       case 'calendar': {
         const back = pickBackExpiry(frontExpiry);
         const atm = nearestStrike(front, 'call', front.underlying);
         return [
-          { action: 'sell', type: 'call', strike: atm, expiry: frontExpiry },
-          { action: 'buy', type: 'call', strike: atm, expiry: back },
+          { action: 'sell', type: 'call', strike: atm, expiry: frontExpiry, qty: 1 },
+          { action: 'buy', type: 'call', strike: atm, expiry: back, qty: 1 },
         ];
       }
       default: // custom
-        return legs.length ? legs : [{ action: 'sell', type: 'put', strike: nearestByDelta(front, 'put', 0.16), expiry: frontExpiry }];
+        return legs.length ? legs : [{ action: 'sell', type: 'put', strike: nearestByDelta(front, 'put', 0.16), expiry: frontExpiry, qty: 1 }];
     }
   }
 
@@ -194,6 +214,7 @@
       const strikeOpts = chain ? strikesOf(chain, leg.type) : (leg.strike ? [leg.strike] : []);
       const crossExpiry = slot.crossExpiry;
       const lockedStrikeAndType = slot.lockedStrikeAndType && i === 1;
+      const lockedQty = structure === 'butterfly' && i === 1; // the body — always 2x a wing's qty
       return `
         <tr data-i="${i}">
           <td><div class="seg${editable ? '' : ' readonly'}">
@@ -207,9 +228,10 @@
           <td>${lockedStrikeAndType
             ? `<span class="mono">${leg.strike ?? '—'} (same as leg 1)</span>`
             : `<select class="strikeSel">${strikeOpts.map(s => `<option value="${s}" ${s === leg.strike ? 'selected' : ''}>${s}</option>`).join('')}</select>`}</td>
-          <td>${(editable || crossExpiry) && !lockedStrikeAndType
-            ? `<select class="expSel">${expirationsList.map(e => `<option value="${e}" ${e === leg.expiry ? 'selected' : ''}>${e}</option>`).join('')}</select>`
-            : `<span class="mono">${leg.expiry || '—'}</span>`}</td>
+          <td><select class="expSel">${expirationsList.map(e => `<option value="${e}" ${e === leg.expiry ? 'selected' : ''}>${e}</option>`).join('')}</select></td>
+          <td>${lockedQty
+            ? `<span class="mono" title="Always double a wing's qty">${leg.qty ?? '—'}</span>`
+            : `<input type="number" class="qtyIn" min="1" step="1" value="${leg.qty ?? 1}">`}</td>
           <td class="quote ${q ? '' : 'stale'}">${q ? q.bid.toFixed(2) : '…'}</td>
           <td class="quote ${q ? '' : 'stale'}">${q ? q.ask.toFixed(2) : '…'}</td>
           <td class="quote ${q ? '' : 'stale'}">${q ? q.mid.toFixed(2) : '…'}</td>
@@ -217,6 +239,8 @@
           <td>${editable && legs.length > 1 ? '<button type="button" class="rmbtn" title="Remove leg">×</button>' : ''}</td>
         </tr>`;
     }).join('');
+
+    renderNetGreeks();
 
     body.querySelectorAll('tr').forEach(tr => {
       const i = Number(tr.dataset.i);
@@ -230,9 +254,25 @@
       };
       const expSel = tr.querySelector('.expSel');
       if (expSel) expSel.onchange = async e => {
-        legs[i].expiry = e.target.value;
-        await getChain(legs[i].expiry);
-        legs[i].strike = nearestStrike(chainCache.get(legs[i].expiry), legs[i].type, legs[i].strike || chainCache.get(legs[i].expiry).underlying);
+        const newExpiry = e.target.value;
+        const crossExpiry = STRUCTURE_SLOTS[structure].crossExpiry;
+        await getChain(newExpiry);
+        const targets = crossExpiry ? [i] : legs.map((_, idx) => idx);
+        for (const idx of targets) {
+          legs[idx].expiry = newExpiry;
+          legs[idx].strike = nearestStrike(chainCache.get(newExpiry), legs[idx].type, legs[idx].strike || chainCache.get(newExpiry).underlying);
+        }
+        renderLegs(); schedulePrice();
+      };
+      const qtyIn = tr.querySelector('.qtyIn');
+      if (qtyIn) qtyIn.onchange = e => {
+        const v = Math.max(1, Math.round(Number(e.target.value)) || 1);
+        if (structure === 'butterfly') {
+          // wings (0, 2) stay matched; the body is always double a wing's qty.
+          legs[0].qty = v; legs[2].qty = v; legs[1].qty = v * 2;
+        } else {
+          legs.forEach(l => { l.qty = v; });
+        }
         renderLegs(); schedulePrice();
       };
       const rm = tr.querySelector('.rmbtn');
@@ -240,10 +280,25 @@
     });
   }
 
+  function renderNetGreeks() {
+    const dEl = document.getElementById('netDelta'), tEl = document.getElementById('netTheta');
+    if (!lastPriced) { dEl.textContent = '—'; tEl.textContent = '—'; return; }
+    let delta = 0, theta = 0, any = false;
+    legs.forEach((l, i) => {
+      const q = lastPriced.legs[i];
+      if (!q || q.strike !== l.strike || q.type !== l.type) return;
+      const sign = l.action === 'buy' ? 1 : -1;
+      if (q.delta != null) { delta += sign * q.delta * l.qty; any = true; }
+      if (q.theta != null) { theta += sign * q.theta * l.qty; any = true; }
+    });
+    dEl.textContent = any ? delta.toFixed(2) : '—';
+    tEl.textContent = any ? theta.toFixed(2) : '—';
+  }
+
   document.getElementById('btnAddLeg').onclick = async () => {
     if (legs.length >= 4) return;
     const front = await getChain(frontExpiry);
-    legs.push({ action: 'sell', type: 'put', strike: nearestByDelta(front, 'put', 0.16), expiry: frontExpiry });
+    legs.push({ action: 'sell', type: 'put', strike: nearestByDelta(front, 'put', 0.16), expiry: frontExpiry, qty: 1 });
     renderLegs(); schedulePrice();
   };
 
@@ -251,17 +306,16 @@
   let priceTimer = null;
   function schedulePrice() { clearTimeout(priceTimer); priceTimer = setTimeout(fetchPrice, 180); }
 
-  function creditOrDebitFor() { return structure === 'custom' ? codOverride : STRUCTURE_SLOTS[structure].creditOrDebit; }
+  function creditOrDebitFor() { const cod = STRUCTURE_SLOTS[structure].creditOrDebit; return cod === null ? codOverride : cod; }
 
   async function fetchPrice() {
     if (!legs.length) return;
     const seq = ++priceSeq;
-    const quantity = Math.max(1, Number(document.getElementById('contractsIn').value) || 1);
     const errEl = document.getElementById('loadErr');
     try {
       const r = await api('POST', '/build/price', {
-        symbol, structure, expiry: frontExpiry, credit_or_debit: creditOrDebitFor(), quantity,
-        legs: legs.map(l => ({ action: l.action, type: l.type, strike: l.strike, expiry: l.expiry })),
+        symbol, structure, expiry: frontExpiry, credit_or_debit: creditOrDebitFor(),
+        legs: legs.map(l => ({ action: l.action, type: l.type, strike: l.strike, expiry: l.expiry, qty: l.qty })),
       });
       if (seq !== priceSeq) return; // a newer request already landed
       lastPriced = r;
@@ -287,8 +341,9 @@
     if (!lastPriced) { row.innerHTML = `<div class="stat"><span class="l">Status</span><span class="v">pricing…</span></div>`; return; }
     const { entry, risk } = lastPriced;
     const cod = creditOrDebitFor();
+    const u = unitsOf(legs, structure);
     row.innerHTML = `
-      <div class="stat"><span class="l">${cod === 'credit' ? 'Net credit' : 'Net debit'}</span><span class="v ${cod === 'credit' ? 'good' : ''}">${fmtMoney(Math.abs(entry.mid * Math.max(1, Number(document.getElementById('contractsIn').value) || 1) * 100))}</span></div>
+      <div class="stat"><span class="l">${cod === 'credit' ? 'Net credit' : 'Net debit'}</span><span class="v ${cod === 'credit' ? 'good' : ''}">${fmtMoney(Math.abs(entry.mid * u * 100))}</span></div>
       <div class="stat"><span class="l">Max profit</span><span class="v good">${risk.max_profit == null ? 'Unlimited' : fmtMoney(risk.max_profit)}</span></div>
       <div class="stat"><span class="l">Max loss</span><span class="v bad">${risk.max_loss == null ? 'Undefined' : fmtMoney(Math.abs(risk.max_loss))}</span></div>
       <div class="stat"><span class="l">Breakeven${(risk.breakevens || []).length > 1 ? 's' : ''}</span><span class="v">${risk.breakevens ? risk.breakevens.map(b => b.toFixed(2)).join(' / ') : '—'}</span></div>
@@ -324,12 +379,12 @@
     return cod === 'debit' ? -Math.abs(mid) : Math.abs(mid);
   }
 
-  function expirationCurve(prices, qty) {
+  function expirationCurve(prices, u) {
     const entry = entryCashPerShare();
-    return prices.map(S => (payoffAtExpiry(legs, S) + entry) * 100 * qty);
+    return prices.map(S => (payoffAtExpiry(legs, S, u) + entry) * 100 * u);
   }
 
-  function t0Curve(prices, qty, Tremaining) {
+  function t0Curve(prices, u, Tremaining) {
     const entry = entryCashPerShare();
     const quoteByLeg = lastPriced.legs;
     return prices.map(S => {
@@ -338,9 +393,10 @@
         const q = quoteByLeg[i];
         const sigma = q && q.iv > 0 ? q.iv : 0.18;
         const price = bsPrice(l.type, S, l.strike, Tremaining, sigma);
-        theo += (l.action === 'buy' ? price : -price);
+        const w = u ? l.qty / u : 1;
+        theo += (l.action === 'buy' ? price : -price) * w;
       });
-      return (theo + entry) * 100 * qty;
+      return (theo + entry) * 100 * u;
     });
   }
 
@@ -361,13 +417,13 @@
     if (!w || !h || !lastPriced) { ctx.clearRect(0, 0, w, h); plotCache = null; return; }
     ctx.clearRect(0, 0, w, h);
 
-    const qty = Math.max(1, Number(document.getElementById('contractsIn').value) || 1);
+    const u = unitsOf(legs, structure);
     const spot = lastPriced.underlying;
     const prices = priceRange(spot);
-    const exp = expirationCurve(prices, qty);
+    const exp = expirationCurve(prices, u);
     const dte = lastPriced.dte;
     const Tremaining = Math.max(0, (dte - asOfDays) / 365);
-    const t0 = t0Curve(prices, qty, Tremaining);
+    const t0 = t0Curve(prices, u, Tremaining);
     const be = findBreakevens(prices, exp);
 
     const padL = 60, padR = 14, padT = 14, padB = 28;
@@ -462,15 +518,14 @@
   document.getElementById('lblIdeas').onclick = () => { destination = 'ideas'; document.getElementById('confirmPanel').hidden = true; renderDestination(); };
   document.getElementById('lblBroker').onclick = () => { destination = 'broker'; renderDestination(); };
 
-  function structSummary() { return legs.map(l => `${l.action === 'sell' ? '−' : '+'}${l.strike}${l.type[0].toUpperCase()}`).join('  '); }
+  function structSummary() { return legs.map(l => `${l.action === 'sell' ? '−' : '+'}${l.qty}x${l.strike}${l.type[0].toUpperCase()}`).join('  '); }
 
   function buildSubmitBody(dest, confirm) {
-    const quantity = Math.max(1, Number(document.getElementById('contractsIn').value) || 1);
     const limit = roundToTick(symbol, Math.abs(lastPriced.entry.mid));
     return {
       symbol, structure, expiry: frontExpiry, credit_or_debit: creditOrDebitFor(),
-      legs: legs.map(l => ({ action: l.action, type: l.type, strike: l.strike, expiry: l.expiry })),
-      limit_price: limit, quantity, thesis: document.getElementById('thesisIn').value, destination: dest, confirm: !!confirm,
+      legs: legs.map(l => ({ action: l.action, type: l.type, strike: l.strike, expiry: l.expiry, qty: l.qty })),
+      limit_price: limit, quantity: unitsOf(legs, structure), thesis: document.getElementById('thesisIn').value, destination: dest, confirm: !!confirm,
     };
   }
 
@@ -508,10 +563,9 @@
   document.getElementById('btnSubmit').onclick = () => {
     if (destination === 'ideas') return doSubmit('ideas', false);
     if (!lastPriced) return toast('Still pricing — try again in a second.', true);
-    const qty = Math.max(1, Number(document.getElementById('contractsIn').value) || 1);
     document.getElementById('cfStruct').textContent = structSummary();
     document.getElementById('cfPrice').textContent = fmtMoney(Math.abs(lastPriced.entry.mid) * 100, false).replace('$', (creditOrDebitFor() === 'credit' ? '+$' : '−$'));
-    document.getElementById('cfQty').textContent = qty;
+    document.getElementById('cfQty').textContent = legs.map(l => l.qty).join(' / ');
     document.getElementById('cfMaxLoss').textContent = lastPriced.risk.max_loss == null ? 'Undefined' : fmtMoney(Math.abs(lastPriced.risk.max_loss));
     document.getElementById('cfRepriceNote').hidden = true;
     pendingRepriceConfirm = false;
@@ -570,9 +624,9 @@
     await loadExpirations();
     structure = t.structure; document.getElementById('tplSel').value = structure;
     codOverride = t.credit_or_debit || 'credit'; document.getElementById('codSel').value = codOverride;
-    document.getElementById('codField').hidden = structure !== 'custom';
+    document.getElementById('codField').hidden = STRUCTURE_SLOTS[structure].creditOrDebit !== null;
     const front = await getChain(frontExpiry);
-    legs = t.legs.map(l => ({ action: l.action, type: l.type, expiry: frontExpiry, strike: nearestStrike(front, l.type, front.underlying + l.strike_offset) }));
+    legs = t.legs.map(l => ({ action: l.action, type: l.type, expiry: frontExpiry, strike: nearestStrike(front, l.type, front.underlying + l.strike_offset), qty: l.qty ?? 1 }));
     renderLegs(); schedulePrice();
     toast(`Loaded template "${t.name}" — strikes re-picked from today's chain.`);
   }
@@ -580,13 +634,12 @@
   async function loadDraft(d) {
     symbol = d.symbol; document.getElementById('symIn').value = symbol;
     await loadExpirations();
-    if (expirationsList.includes(d.expiry)) { frontExpiry = d.expiry; document.getElementById('expSel').value = frontExpiry; }
+    if (expirationsList.includes(d.expiry)) frontExpiry = d.expiry;
     structure = d.structure; document.getElementById('tplSel').value = structure;
     codOverride = d.credit_or_debit; document.getElementById('codSel').value = codOverride;
-    document.getElementById('codField').hidden = structure !== 'custom';
+    document.getElementById('codField').hidden = STRUCTURE_SLOTS[structure].creditOrDebit !== null;
     await getChain(frontExpiry);
-    legs = d.legs.map(l => ({ action: l.action, type: l.type, strike: l.strike, expiry: l.expiry }));
-    document.getElementById('contractsIn').value = d.quantity;
+    legs = d.legs.map(l => ({ action: l.action, type: l.type, strike: l.strike, expiry: l.expiry, qty: l.qty ?? d.quantity ?? 1 }));
     document.getElementById('thesisIn').value = d.thesis || '';
     renderLegs(); schedulePrice();
     toast(`Loaded draft "${d.name || d.symbol}".`);
@@ -604,30 +657,26 @@
   document.getElementById('btnSaveDraft').onclick = async () => {
     if (!lastPriced) return toast('Price the structure first.', true);
     const name = prompt('Name this draft (optional):', '');
-    const quantity = Math.max(1, Number(document.getElementById('contractsIn').value) || 1);
     try {
       await api('POST', '/build/drafts', {
         name, symbol, structure, expiry: frontExpiry, credit_or_debit: creditOrDebitFor(),
-        legs, limit_price: roundToTick(symbol, Math.abs(lastPriced.entry.mid)), quantity, thesis: document.getElementById('thesisIn').value,
+        legs, limit_price: roundToTick(symbol, Math.abs(lastPriced.entry.mid)), quantity: unitsOf(legs, structure), thesis: document.getElementById('thesisIn').value,
       });
       toast('Draft saved — find it under Saved below.'); loadSaved();
     } catch (e) { toast(e.message, true); }
   };
 
-  // ── top controls: symbol / expiry / structure ──
+  // ── top controls: symbol / structure (expiry now lives per-leg, in the Legs table) ──
   async function loadExpirations() {
     const r = await api('GET', `/expirations/${encodeURIComponent(symbol)}`);
     expirationsList = r.expirations || [];
-    const sel = document.getElementById('expSel');
-    sel.innerHTML = expirationsList.map(e => `<option value="${e}">${e}</option>`).join('');
     frontExpiry = expirationsList[0] || null;
-    sel.value = frontExpiry;
     chainCache.clear();
   }
 
   async function onStructureChange(initial) {
     structure = document.getElementById('tplSel').value;
-    document.getElementById('codField').hidden = structure !== 'custom';
+    document.getElementById('codField').hidden = STRUCTURE_SLOTS[structure].creditOrDebit !== null;
     if (!initial) legs = await defaultLegsFor(structure);
     renderLegs();
     schedulePrice();
@@ -641,14 +690,8 @@
     legs = await defaultLegsFor(structure);
     renderLegs(); schedulePrice();
   });
-  document.getElementById('expSel').addEventListener('change', async e => {
-    frontExpiry = e.target.value;
-    legs = await defaultLegsFor(structure);
-    renderLegs(); schedulePrice();
-  });
   document.getElementById('tplSel').addEventListener('change', () => onStructureChange(false));
   document.getElementById('codSel').addEventListener('change', e => { codOverride = e.target.value; renderStats(); schedulePrice(); });
-  document.getElementById('contractsIn').addEventListener('change', () => { renderStats(); drawChart(); });
 
   // ── boot ──
   (async () => {
