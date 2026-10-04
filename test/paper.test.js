@@ -955,6 +955,59 @@ test('api: Build tab — RSB (Ratio Superbull): debit call spread + a short put,
   assert.equal(ok.data.idea.status, 'pending');
 });
 
+test('api: Build tab — rsb/custom auto-correct a wrong credit/debit declaration from live quotes', async t => {
+  // These exact legs (same as the RSB test above) actually price to a net
+  // DEBIT — but nothing stops a caller from declaring "credit" for a
+  // free-direction structure, and openingPrice()/riskProfile() both trust
+  // whatever direction they're handed. Getting this backwards doesn't just
+  // mislabel the UI: it silently flips max profit/loss and breakevens, which
+  // could let a trade through a max-loss check that the true numbers would
+  // have failed. /build/price and /build/submit must both ignore the
+  // declared direction for rsb/custom and use the one the live quotes
+  // actually produce.
+  const ctx = await startApp();
+  t.after(ctx.close);
+  const legs = [
+    { action: 'buy', type: 'call', strike: 7650 }, { action: 'sell', type: 'call', strike: 7670 },
+    { action: 'sell', type: 'put', strike: 7600 },
+  ];
+
+  const pricedWrong = await ctx.call('POST', '/paper/api/build/price', ctx.owner, { symbol: 'SPX', structure: 'rsb', expiry: '2026-10-05', credit_or_debit: 'credit', legs });
+  assert.equal(pricedWrong.status, 200, JSON.stringify(pricedWrong.data));
+  assert.equal(pricedWrong.data.credit_or_debit, 'debit', 'server recomputes the true direction instead of trusting the client');
+  assert.ok(pricedWrong.data.entry.mid > 0, 'entry.mid is a positive magnitude once the direction is corrected');
+
+  const pricedRight = await ctx.call('POST', '/paper/api/build/price', ctx.owner, { symbol: 'SPX', structure: 'rsb', expiry: '2026-10-05', credit_or_debit: 'debit', legs });
+  assert.equal(pricedRight.status, 200, JSON.stringify(pricedRight.data));
+  // Same legs, same truth, regardless of which direction the client guessed.
+  assert.equal(pricedRight.data.credit_or_debit, 'debit');
+  assert.equal(pricedRight.data.entry.mid, pricedWrong.data.entry.mid);
+  assert.deepEqual(pricedRight.data.risk, pricedWrong.data.risk);
+
+  await ctx.call('PUT', '/paper/api/settings', ctx.owner, { version: 1, values: { 'risk.max_loss_per_trade': 1_000_000, 'risk.max_total_open_risk': 1_000_000 } });
+  const limit = roundToTick('SPX', Math.abs(pricedWrong.data.entry.mid), 'down');
+  const base = { symbol: 'SPX', structure: 'rsb', expiry: '2026-10-05', legs, limit_price: limit, quantity: 1, thesis: 'test rsb direction', destination: 'ideas' };
+
+  // Submitted with the WRONG declared direction — the idea actually created
+  // (and risk-checked) must still reflect the true, corrected economics.
+  const wrong = await ctx.call('POST', '/paper/api/build/submit', ctx.owner, { ...base, credit_or_debit: 'credit' });
+  assert.equal(wrong.status, 201, JSON.stringify(wrong.data));
+  assert.equal(wrong.data.idea.credit_or_debit, 'debit', 'the stored idea carries the corrected direction, not the client\'s guess');
+
+  const right = await ctx.call('POST', '/paper/api/build/submit', ctx.owner, { ...base, credit_or_debit: 'debit' });
+  assert.equal(right.status, 201, JSON.stringify(right.data));
+
+  // Both submissions must land on the identical, correct risk numbers —
+  // not the corrupted ones a trusted-but-wrong "credit" declaration would
+  // have produced (which, for this exact spread, understates max_loss by
+  // over $1,300 and misplaces the breakeven by more than 63 points).
+  const wrongComputed = wrong.data.idea.validation.computed, rightComputed = right.data.idea.validation.computed;
+  assert.equal(wrongComputed.max_profit, rightComputed.max_profit);
+  assert.equal(wrongComputed.max_loss, rightComputed.max_loss);
+  assert.deepEqual(wrongComputed.breakevens, rightComputed.breakevens);
+  assert.ok(wrongComputed.max_loss > rightComputed.max_loss - 5, 'sanity: this is the true (larger, debit-side) max loss, not the corrupted credit-side figure');
+});
+
 test('api: Build tab — templates (reusable shape) and drafts (concrete saved order)', async t => {
   const ctx = await startApp();
   t.after(ctx.close);

@@ -156,6 +156,21 @@ function openingPrice(legs, quotes, creditOrDebit, structure) {
   return { mid: r2(mid), natural: r2(natural) };
 }
 
+// The actual credit/debit direction a set of legs prices to, from their live
+// quotes — not the direction a caller declares. Every named structure has a
+// shape rule that forces its direction (checkShape's `want(credit, ...)` /
+// `want(!credit, ...)`), so a caller can't get this wrong for those; "custom"
+// and "rsb" have no such rule (which leg combination nets credit vs debit
+// genuinely depends on live premiums), so callers for those two must use
+// this instead of guessing — openingPrice()/riskProfile() both assume their
+// caller already passed the *correct* direction, and silently produce wrong
+// numbers (flipped max profit/loss, wrong breakevens) when it's backwards.
+function naturalCreditOrDebit(legs, quotes, structure) {
+  const raw = openingPrice(legs, quotes, 'credit', structure); // unflipped: positive = truly a net credit
+  if (!raw) return null;
+  return raw.mid >= 0 ? 'credit' : 'debit';
+}
+
 // Mark of an open position: value of the structure now (per unit, positive),
 // and P&L in dollars. entryPrice is per unit, positive.
 function mark(legs, quotes, creditOrDebit, entryPrice, structure) {
@@ -194,4 +209,4 @@ function roundToTick(symbol, price, dir = 'nearest') {
 function legKey(l) { return `${l.expiry}|${l.type}|${Number(l.strike)}`; }
 function r2(v) { return Math.round(v * 100) / 100 + 0; } // + 0 turns -0 into 0
 
-module.exports = { normLegs, units, sells, buys, riskProfile, payoffAtExpiry, openingPrice, mark, closingPrice, roundToTick, legKey, MULT, r2 };
+module.exports = { normLegs, units, sells, buys, riskProfile, payoffAtExpiry, openingPrice, naturalCreditOrDebit, mark, closingPrice, roundToTick, legKey, MULT, r2 };

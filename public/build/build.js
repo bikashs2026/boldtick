@@ -213,7 +213,15 @@
     body.innerHTML = legs.map((leg, i) => {
       const q = lastPriced && lastPriced.legs[i] && lastPriced.legs[i].strike === leg.strike && lastPriced.legs[i].type === leg.type ? lastPriced.legs[i] : null;
       const chain = chainCache.get(leg.expiry);
-      const strikeOpts = chain ? strikesOf(chain, leg.type) : (leg.strike ? [leg.strike] : []);
+      let strikeOpts = chain ? strikesOf(chain, leg.type) : (leg.strike ? [leg.strike] : []);
+      // A loaded draft/template can carry a strike or expiry that isn't in
+      // the live list anymore (its chain hasn't loaded yet, or its expiry
+      // has since passed) — inject it as an extra option so the dropdown
+      // actually shows what's stored, instead of a <select> with no
+      // matching option silently falling back to its first option while the
+      // real (different) value stays selected underneath.
+      if (leg.strike != null && !strikeOpts.includes(leg.strike)) strikeOpts = [leg.strike, ...strikeOpts];
+      const expOpts = (leg.expiry && !expirationsList.includes(leg.expiry)) ? [leg.expiry, ...expirationsList] : expirationsList;
       const typeEditable = editable || slot.freeType;
       const lockedQty = structure === 'butterfly' && i === 1; // the body — always 2x a wing's qty
       return `
@@ -227,7 +235,7 @@
             <button type="button" class="type ${leg.type === 'put' ? 'active put' : ''}" data-type="put"${typeEditable ? '' : ' disabled'}>Put</button>
           </div></td>
           <td><select class="strikeSel">${strikeOpts.map(s => `<option value="${s}" ${s === leg.strike ? 'selected' : ''}>${s}</option>`).join('')}</select></td>
-          <td><select class="expSel">${expirationsList.map(e => `<option value="${e}" ${e === leg.expiry ? 'selected' : ''}>${e}</option>`).join('')}</select></td>
+          <td><select class="expSel">${expOpts.map(e => `<option value="${e}" ${e === leg.expiry ? 'selected' : ''}>${e}${expirationsList.includes(e) ? '' : ' (expired)'}</option>`).join('')}</select></td>
           <td>${lockedQty
             ? `<span class="mono" title="Always double a wing's qty">${leg.qty ?? '—'}</span>`
             : `<input type="number" class="qtyIn" min="1" step="1" value="${leg.qty ?? 1}">`}</td>
@@ -311,6 +319,17 @@
 
   function creditOrDebitFor() { const cod = STRUCTURE_SLOTS[structure].creditOrDebit; return cod === null ? codOverride : cod; }
 
+  // custom/rsb show "Price is" but never let it be hand-picked — the server
+  // (naturalCreditOrDebit in pricing.js) is the only thing that gets to say
+  // which way those actually net, since guessing wrong silently flips the
+  // risk math. The field stays visible (so the real direction is shown) but
+  // disabled; fetchPrice() keeps it synced to the server's own answer.
+  function updateCodField() {
+    const free = STRUCTURE_SLOTS[structure].creditOrDebit === null;
+    document.getElementById('codField').hidden = !free;
+    document.getElementById('codSel').disabled = free;
+  }
+
   async function fetchPrice() {
     if (!legs.length) return;
     const seq = ++priceSeq;
@@ -322,6 +341,14 @@
       });
       if (seq !== priceSeq) return; // a newer request already landed
       lastPriced = r;
+      // custom/rsb have no fixed direction — which way the legs actually net
+      // is computed server-side from live quotes (never guessed client-side;
+      // guessing wrong would silently flip max profit/loss), so sync the
+      // display to whatever the server just computed.
+      if (STRUCTURE_SLOTS[structure].creditOrDebit === null && r.credit_or_debit) {
+        codOverride = r.credit_or_debit;
+        document.getElementById('codSel').value = codOverride;
+      }
       errEl.hidden = true;
       document.getElementById('spotVal').textContent = r.underlying != null ? r.underlying.toLocaleString('en-US', { minimumFractionDigits: 2 }) : '—';
       document.getElementById('asofSlider').max = Math.max(0.1, r.dte);
@@ -627,7 +654,7 @@
     await loadExpirations();
     structure = t.structure; document.getElementById('tplSel').value = structure;
     codOverride = t.credit_or_debit || 'credit'; document.getElementById('codSel').value = codOverride;
-    document.getElementById('codField').hidden = STRUCTURE_SLOTS[structure].creditOrDebit !== null;
+    updateCodField();
     const front = await getChain(frontExpiry);
     legs = t.legs.map(l => ({ action: l.action, type: l.type, expiry: frontExpiry, strike: nearestStrike(front, l.type, front.underlying + l.strike_offset), qty: l.qty ?? 1 }));
     renderLegs(); schedulePrice();
@@ -640,12 +667,22 @@
     if (expirationsList.includes(d.expiry)) frontExpiry = d.expiry;
     structure = d.structure; document.getElementById('tplSel').value = structure;
     codOverride = d.credit_or_debit; document.getElementById('codSel').value = codOverride;
-    document.getElementById('codField').hidden = STRUCTURE_SLOTS[structure].creditOrDebit !== null;
-    await getChain(frontExpiry);
+    updateCodField();
     legs = d.legs.map(l => ({ action: l.action, type: l.type, strike: l.strike, expiry: l.expiry, qty: l.qty ?? d.quantity ?? 1 }));
+    // Fetch every distinct expiry this draft's legs actually use (not just
+    // the front one) so their strike dropdowns populate immediately, rather
+    // than showing only the single stored strike until each one is touched.
+    // A leg whose expiry has since passed won't have a chain to fetch —
+    // getChain() rejects, which is expected; that leg's expiry is flagged
+    // "(expired)" in the dropdown and pricing will report it can't be found.
+    const expired = [];
+    await Promise.all([...new Set(legs.map(l => l.expiry))].map(exp =>
+      getChain(exp).catch(() => { expired.push(exp); })));
     document.getElementById('thesisIn').value = d.thesis || '';
     renderLegs(); schedulePrice();
-    toast(`Loaded draft "${d.name || d.symbol}".`);
+    toast(expired.length
+      ? `Loaded draft "${d.name || d.symbol}" — ${expired.join(', ')} has already passed; pick a new expiry for those legs.`
+      : `Loaded draft "${d.name || d.symbol}".`, expired.length > 0);
   }
 
   document.getElementById('btnSaveTemplate').onclick = async () => {
@@ -679,7 +716,7 @@
 
   async function onStructureChange(initial) {
     structure = document.getElementById('tplSel').value;
-    document.getElementById('codField').hidden = STRUCTURE_SLOTS[structure].creditOrDebit !== null;
+    updateCodField();
     if (!initial) legs = await defaultLegsFor(structure);
     renderLegs();
     schedulePrice();
