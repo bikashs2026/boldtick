@@ -12,7 +12,7 @@ const path = require('path');
 const { Clock } = require('../src/paper/clock');
 const { Store } = require('../src/paper/store');
 const { Settings } = require('../src/paper/settings');
-const { FakeMarket } = require('../src/paper/marketData');
+const { FakeMarket, fromSchwabShape } = require('../src/paper/marketData');
 const { validateIdea, checkShape } = require('../src/paper/validate');
 const { riskProfile, mark, roundToTick, normLegs } = require('../src/paper/pricing');
 const { evaluate } = require('../src/paper/engine');
@@ -88,6 +88,29 @@ test('store: atomic save, append, refuses unreadable files', () => {
   assert.throws(() => s.load('bad.json', []), /unreadable/);
   const dest = s.backup('2026-10-05');
   assert.ok(fs.existsSync(path.join(dest, 'a.json')));
+});
+
+test('marketData: fromSchwabShape carries gamma, theta, vega and open interest, not just delta/iv', () => {
+  const chain = {
+    underlyingPrice: 101.4,
+    callExpDateMap: {
+      '2026-10-09:5': {
+        '100.0': [{ symbol: 'MU   261009C00100000', bid: 5.2, ask: 5.4, mark: 5.3, delta: 0.62, volatility: 42.1, gamma: 0.031, theta: -0.08, vega: 0.14, openInterest: 1830 }],
+      },
+    },
+    putExpDateMap: {},
+  };
+  const out = fromSchwabShape('MU', '2026-10-09', chain, 'tastytrade');
+  assert.equal(out.contracts.length, 1);
+  const c = out.contracts[0];
+  assert.equal(c.type, 'call');
+  assert.equal(c.strike, 100);
+  assert.equal(c.delta, 0.62);
+  assert.ok(Math.abs(c.iv - 0.421) < 1e-9);
+  assert.equal(c.gamma, 0.031, 'gamma was dropped before — chain consumers (including Muse) only saw delta/iv');
+  assert.equal(c.theta, -0.08);
+  assert.equal(c.vega, 0.14);
+  assert.equal(c.oi, 1830);
 });
 
 test('pricing: risk per structure, marks, ticks', () => {

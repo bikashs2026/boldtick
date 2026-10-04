@@ -119,7 +119,7 @@ Muse uses `/api/paper/...` with header `X-API-Key`. The website uses `/paper/api
 | `GET /signals` · `GET /events?after=<id>` | both | Action feed · event feed with cursor |
 | `POST /price-check` | both | Live mid/natural and risk of a structure, no side effects |
 | `GET /quote/:symbol` · `GET /expirations/:symbol` | both | Live underlying price · listed expirations |
-| `GET /chain/:symbol[?expiry=YYYY-MM-DD][&strikeLow=&strikeHigh=]` | both | Full option chain, one expiry (defaults to the nearest listed). `{ symbol, expiry, underlying, at, source, contracts: [{ type, strike, occ, bid, ask, mid, delta, iv }] }` |
+| `GET /chain/:symbol[?expiry=YYYY-MM-DD][&strikeLow=&strikeHigh=]` | both | Full option chain, one expiry (defaults to the nearest listed). `{ symbol, expiry, underlying, at, source, contracts: [{ type, strike, occ, bid, ask, mid, delta, gamma, theta, vega, iv, oi }] }` |
 | `GET /settings[?meta=1]` · `PUT /settings` | both · owner | `{ version, values: { "risk.max_loss_per_trade": 800 }, modes: {…}, exit_per_structure: {…} }` |
 | `GET /settings/history` · `POST /settings/reset` | owner | Change log · defaults |
 | `POST /positions/apply-settings` | owner | Re-apply exit rules to open positions |

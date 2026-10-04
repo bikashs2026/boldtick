@@ -29,6 +29,7 @@ function fromSchwabShape(symbol, expiry, chain, source) {
           type: side, strike: Number(k), occ: o.symbol,
           bid, ask, mid: bid > 0 || ask > 0 ? r2((bid + ask) / 2) : num(o.mark),
           delta: num(o.delta), iv: o.volatility > 0 ? o.volatility / 100 : null,
+          gamma: num(o.gamma), theta: num(o.theta), vega: num(o.vega), oi: num(o.openInterest),
         });
       }
     }
