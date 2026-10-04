@@ -27,6 +27,67 @@ const Analyze = (() => {
   function initHeader() {
     const clockEl = document.getElementById('clock');
     if (clockEl) clockTick(clockEl);
+    wireIdeaAlert();
+  }
+
+  // Pending-idea badge + alert sound on the "Execute" nav link, for any
+  // Analyze page. Execute's own tab already has a badge/alert tied directly
+  // to its event stream; this is the lightweight version so a new idea from
+  // Muse isn't invisible just because you're on a different tab. Polls
+  // GET /paper/api/status (same counts.pending_ideas Execute's own header
+  // already uses — no new endpoint) every 20s, and reads alerts.new_idea
+  // from Settings once so it respects the same on/off switch Execute does.
+  function wireIdeaAlert() {
+    const link = document.querySelector('a[href="/paper/"]');
+    if (!link) return;
+    let lastCount = null, alertOn = true, audioCtx;
+
+    function beep() {
+      try {
+        audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+        const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+        o.frequency.value = 660;
+        g.gain.setValueAtTime(0.08, audioCtx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.25);
+        o.connect(g).connect(audioCtx.destination);
+        o.start(); o.stop(audioCtx.currentTime + 0.25);
+      } catch { /* audio blocked until the first click on the page — badge still updates */ }
+    }
+
+    function badgeEl() {
+      let el = document.getElementById('navIdeaBadge');
+      if (el) return el;
+      el = document.createElement('span');
+      el.id = 'navIdeaBadge';
+      el.className = 'nav-idea-badge';
+      el.title = 'Pending trade ideas';
+      el.hidden = true;
+      link.appendChild(el);
+      return el;
+    }
+
+    async function poll() {
+      try {
+        const r = await fetch('/paper/api/status', { credentials: 'same-origin' });
+        if (!r.ok) return; // not logged in here yet, or desk unreachable — leave badge as last known
+        const s = await r.json();
+        const n = s.counts?.pending_ideas ?? 0;
+        const el = badgeEl();
+        el.hidden = n === 0;
+        el.textContent = n;
+        if (lastCount !== null && n > lastCount && alertOn) beep();
+        lastCount = n;
+      } catch { /* offline — leave the last known badge as-is */ }
+    }
+
+    (async () => {
+      try {
+        const r = await fetch('/paper/api/settings', { credentials: 'same-origin' });
+        if (r.ok) { const s = await r.json(); alertOn = s.values?.['alerts.new_idea'] !== false; }
+      } catch { /* default stays on */ }
+      poll();
+      setInterval(poll, 20000);
+    })();
   }
 
   // Shared symbol/expiry controls: loads expirations, keeps them in sync,
