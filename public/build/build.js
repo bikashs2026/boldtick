@@ -617,7 +617,13 @@
 
   function renderTemplates(list) {
     const el = document.getElementById('templatesList');
-    document.getElementById('templatesEmpty').hidden = list.length > 0;
+    // The empty-state paragraph is only ever in the DOM when the list is
+    // empty (see the innerHTML below) — so after the first render with any
+    // items, #templatesEmpty no longer exists. Looking it up here instead
+    // of relying on that conditional innerHTML would throw on every render
+    // after the first non-empty one, and — since this runs inside
+    // loadSaved()'s try/catch — silently abort the whole refresh, which is
+    // exactly why Delete/Save used to need a page reload to show up.
     el.innerHTML = (list.length ? '' : '<p class="empty" id="templatesEmpty">No templates saved yet.</p>') + list.map(t => `
       <div class="saved-row" data-id="${t.id}">
         <span class="name">${esc(t.name)}</span>
@@ -635,7 +641,7 @@
 
   function renderDrafts(list) {
     const el = document.getElementById('draftsList');
-    document.getElementById('draftsEmpty').hidden = list.length > 0;
+    // See the matching comment in renderTemplates() above — same bug, same fix.
     el.innerHTML = (list.length ? '' : '<p class="empty" id="draftsEmpty">No drafts saved yet.</p>') + list.map(d => `
       <div class="saved-row" data-id="${d.id}">
         <span class="name">${esc(d.name || d.symbol)}</span>
