@@ -21,6 +21,7 @@ The running version is shown in the website header, in the `npm start` summary a
 - tastytrade error messages: a rejection's specific reason (tastytrade's nested `errors` list) was dropped, leaving only its generic wrapper message (for example "One or more preflight checks failed" with no detail). The specific reason is now included.
 - Net premium flow's Raw-volume/Aggressor-adjusted control: the two options were styled as faint dashed-border info pills (meant for passive labels elsewhere on the page), so the unselected one was barely legible. Replaced with an actual switch between the two labels; the active label is highlighted instead.
 - A limit price off the exchange's tick (for example 1.28 on an SPX option, which only trades in $0.05/$0.10 increments) was accepted at idea creation and at approve — validation and risk math ran against the un-rounded number, and it was only rounded to a valid tick silently, at the very end, right before the order was sent. Now rejected as invalid at both creation and approve, before any of that runs.
+- Analyze's pending-idea badge (on the "Execute" nav link) showed "0" instead of staying hidden: `.nav-idea-badge` set `display` unconditionally, which as an author rule overrides the browser's own `[hidden] { display: none }`, so setting the element's `hidden` property had no visible effect. Added an explicit `.nav-idea-badge[hidden]` rule.
 
 ## [0.4] — 2026-10-03
 
