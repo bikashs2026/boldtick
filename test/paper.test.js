@@ -160,6 +160,29 @@ test('settings: defaults, validated updates, version conflicts, per-structure, r
   assert.equal(again.get().version, 3);
 });
 
+test('settings: an install whose risk.allowed_structures predates butterfly/rsb gets them backfilled, not structures it deliberately unchecked', () => {
+  const dir = tmpDir();
+  const { clock } = testClock(MON_1005);
+  const store = new Store(dir);
+  // Simulate an install that saved its settings before butterfly/rsb existed,
+  // and had already (deliberately) unchecked covered_call.
+  const stale = ['iron_condor', 'bull_put_spread', 'diagonal', 'calendar', 'covered_strangle', 'custom'];
+  store.save('settings.json', { version: 5, updated_at: null, values: { 'risk.allowed_structures': stale.slice() }, modes: {}, exit_per_structure: {} });
+
+  const s = new Settings(store, clock);
+  const allowed = s.value('risk.allowed_structures');
+  assert.ok(allowed.includes('butterfly'), 'butterfly backfilled in');
+  assert.ok(allowed.includes('rsb'), 'rsb backfilled in');
+  assert.ok(!allowed.includes('covered_call'), 'a structure the owner actually unchecked stays off');
+  assert.equal(s.get().version, 5, "backfilling doesn't bump the settings version");
+
+  // The backfill is persisted immediately, not just held in memory, so a
+  // second restart (no further backfill needed) still sees it and doesn't
+  // re-trigger a save loop.
+  const reloaded = new Settings(store, clock);
+  assert.deepEqual(new Set(reloaded.value('risk.allowed_structures')), new Set(allowed));
+});
+
 // ── unit: validation ────────────────────────────────────────────────────────
 test('validation: shape rules per structure', () => {
   const L = (...x) => x.map(([action, type, strike, expiry]) => ({ action, type, strike, qty: 1, expiry: expiry || 'E' }));

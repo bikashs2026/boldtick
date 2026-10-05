@@ -101,6 +101,7 @@ class Settings {
     this.clock = clock;
     const saved = store.load('settings.json', null);
     const base = defaults();
+    let backfilled = false;
     if (saved) {
       // Keep saved values for known keys; new keys added in later versions get defaults.
       for (const k of Object.keys(base.values)) if (saved.values && k in saved.values) base.values[k] = saved.values[k];
@@ -108,9 +109,20 @@ class Settings {
       base.exit_per_structure = saved.exit_per_structure || {};
       base.version = saved.version || 1;
       base.updated_at = saved.updated_at || null;
+      // 'butterfly' and 'rsb' were added to STRUCTURES after some installs
+      // already had risk.allowed_structures saved to disk — that saved
+      // array is kept verbatim above like any other value, so an install
+      // whose settings predate those two silently excludes them forever,
+      // even though they'd be allowed by default on a fresh install today.
+      // Backfill only those two (and only if genuinely missing) — anything
+      // else absent from the array was a deliberate uncheck and stays off.
+      const allowed = base.values['risk.allowed_structures'];
+      if (Array.isArray(allowed)) {
+        for (const s of ['butterfly', 'rsb']) if (!allowed.includes(s)) { allowed.push(s); backfilled = true; }
+      }
     }
     this.state = base;
-    if (!saved) store.save('settings.json', this.state);
+    if (!saved || backfilled) store.save('settings.json', this.state);
   }
 
   get() { return clone(this.state); }
