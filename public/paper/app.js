@@ -446,7 +446,7 @@
       audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
       const o = audioCtx.createOscillator(), g = audioCtx.createGain();
       o.frequency.value = urgent ? 880 : 660;
-      g.gain.setValueAtTime(0.08, audioCtx.currentTime);
+      g.gain.setValueAtTime(0.35, audioCtx.currentTime);
       g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + (urgent ? 0.6 : 0.25));
       o.connect(g).connect(audioCtx.destination);
       o.start(); o.stop(audioCtx.currentTime + (urgent ? 0.6 : 0.25));
