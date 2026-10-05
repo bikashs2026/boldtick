@@ -11,6 +11,24 @@
   const time = iso => iso ? new Date(iso).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '—';
   const label = s => String(s || '').replace(/_/g, ' ');
 
+  // ── client-side tick rounding, mirrors src/paper/pricing.js roundToTick ──
+  // A structure's live "Value/natural" (mark()'s raw net of each leg's own
+  // mid/bid/ask) is a sum of several independently-quoted legs, so it almost
+  // never lands on an exchange-valid tick even though every leg it's built
+  // from does — SPX/SPXW/XSP trade in $0.05 increments under $3 and $0.10
+  // at/above, everything else in $0.01. Showing that raw figure (e.g.
+  // "1.37" for SPX) is misleading since no order can actually be placed at
+  // it; the server already rounds whatever price an order is submitted at
+  // (desk.js's closeRequest), so rounding it here too just makes the
+  // display match what a Close actually does, and gives the Limit input a
+  // sane, already-valid starting point instead of an uneditable-looking one.
+  function roundToTick(symbol, price) {
+    const s = String(symbol).toUpperCase().replace(/^\$/, '');
+    const tick = (s === 'SPX' || s === 'SPXW' || s === 'XSP') ? (Math.abs(price) >= 3 ? 0.10 : 0.05) : 0.01;
+    const steps = Math.round(Number((price / tick).toFixed(6)));
+    return Math.max(tick, Math.round(steps * tick * 100) / 100);
+  }
+
   // ── API ──
   async function api(method, path, body) {
     const res = await fetch(API + path, {
@@ -127,7 +145,7 @@
         <td>${esc(label(p.structure))}<div>${flags}</div></td>
         <td class="legs">${legsHtml(p.legs)}</td>
         <td class="num">${px(p.entry_price)}<div class="muted">${p.credit_or_debit}</div></td>
-        <td class="num">${px(m.value)} / ${px(m.natural)}<div class="muted">${m.underlying ? 'und ' + px(m.underlying) : ''}</div></td>
+        <td class="num" title="${m.value != null ? `exact: ${px(m.value)} / ${px(m.natural)}` : ''}">${m.value != null ? px(roundToTick(p.symbol, m.value)) : '—'} / ${m.natural != null ? px(roundToTick(p.symbol, m.natural)) : '—'}<div class="muted">${m.underlying ? 'und ' + px(m.underlying) : ''}</div></td>
         <td class="num ${cls(m.pnl)}">${money(m.pnl, true)}<div class="muted">max ${money(p.max_profit)} / −${money(p.max_loss)}</div></td>
         <td class="num">${m.pct_max == null ? '—' : m.pct_max.toFixed(0) + '%'}</td>
         <td class="num">${p.dte ?? '—'}</td>
@@ -136,8 +154,13 @@
         <td><div class="row-actions">
           ${closingOrder
             ? `<button type="button" class="btn small danger" data-close="${p.id}" data-mode="natural"${crossOk ? '' : ' title="Re-price the working close at the natural price"'}>Cross to natural</button><button type="button" class="btn small" data-cancel-close="${esc(p.close_order_id)}">Cancel close</button>`
-            : `<button type="button" class="btn small" data-close="${p.id}" data-mode="mid">Close at mid</button><button type="button" class="btn small" data-close="${p.id}" data-mode="natural">Natural</button>
-               <input class="num" type="number" step="0.05" min="0.01" placeholder="limit" aria-label="Close limit price" data-limit-for="${p.id}"><button type="button" class="btn small" data-close="${p.id}" data-mode="limit">Limit</button>`}
+            : (() => {
+                const s = String(p.symbol).toUpperCase().replace(/^\$/, '');
+                const step = (s === 'SPX' || s === 'SPXW' || s === 'XSP') ? (Math.abs(m.natural ?? m.value ?? 0) >= 3 ? '0.10' : '0.05') : '0.01';
+                const start = m.natural != null ? roundToTick(p.symbol, m.natural) : '';
+                return `<button type="button" class="btn small" data-close="${p.id}" data-mode="mid">Close at mid</button><button type="button" class="btn small" data-close="${p.id}" data-mode="natural">Natural</button>
+               <input class="num" type="number" step="${step}" min="${step}" placeholder="limit" aria-label="Close limit price" value="${start}" data-limit-for="${p.id}"><button type="button" class="btn small" data-close="${p.id}" data-mode="limit">Limit</button>`;
+              })()}
         </div></td></tr>`;
     }).join('')}</tbody>`;
   }
