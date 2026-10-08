@@ -357,8 +357,8 @@ async function refresh() {
     kpisEl.innerHTML = [
       kpi('Regime', snap.hasOI ? `${snap.regime === 'Positive' ? '+γ' : '-γ'} ${snap.regime}` : 'No OI', snap.totalGEX != null ? `net ${fmtM(snap.totalGEX)}` : '', snap.regime === 'Positive' ? 'var(--good)' : 'var(--bad)'),
       kpi('Gamma flip', fmt(snap.flip, 0), snap.flip != null ? `${Math.abs(snap.price - snap.flip).toFixed(0)} pts from spot` : '', 'var(--accent)'),
-      kpi('Call wall', fmt(snap.callWall, 0), '', 'var(--call)'),
       kpi('Put wall', fmt(snap.putWall, 0), '', 'var(--put)'),
+      kpi('Call wall', fmt(snap.callWall, 0), '', 'var(--call)'),
       kpi('Max pain', fmt(snap.maxPain, 0), '', 'var(--text-hi)'),
       kpi('Expected move', '±' + fmt(snap.expectedMove, 0), snap.expectedMove != null ? `${fmt(snap.price - snap.expectedMove, 0)} – ${fmt(snap.price + snap.expectedMove, 0)}` : '', 'var(--text-hi)'),
     ].join('');
