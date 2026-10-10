@@ -110,7 +110,7 @@
 <script src="analyze.js"></script>
 <script>
 Analyze.initHeader();
-const { fmt, fmtM, esc, api } = Analyze;
+const { fmt, fmtM, fmtStrike, esc, api } = Analyze;
 
 const chainBody = document.getElementById('chainBody');
 const errBox = document.getElementById('errBox');
@@ -159,7 +159,7 @@ function renderChain(rows, spotPx) {
       <td style="text-align:right; ${callItm}; color:var(--text-hi)">${fmt(c?.bid)}</td>
       <td style="text-align:right; ${callItm}; color:var(--text-hi)">${fmt(c?.ask)}</td>
       <td style="padding:0 4px; text-align:center; border-left:1px solid #2A2C31; border-right:1px solid #2A2C31; background:#121316">
-        <button type="button" data-strike="${r.strike}" style="width:100%; min-height:28px; background:${isPicked ? 'var(--accent)' : 'transparent'}; border:1px solid ${isPicked ? 'var(--accent)' : '#3A3C42'}; border-radius:4px; color:${isPicked ? '#15130D' : 'var(--text)'}; font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:600; cursor:pointer">${fmt(r.strike, 0)}</button>
+        <button type="button" data-strike="${r.strike}" style="width:100%; min-height:28px; background:${isPicked ? 'var(--accent)' : 'transparent'}; border:1px solid ${isPicked ? 'var(--accent)' : '#3A3C42'}; border-radius:4px; color:${isPicked ? '#15130D' : 'var(--text)'}; font-family:'JetBrains Mono',monospace; font-size:13px; font-weight:600; cursor:pointer">${fmtStrike(r.strike)}</button>
       </td>
       <td style="${putItm}; color:var(--text-hi)">${fmt(p?.bid)}</td>
       <td style="${putItm}; color:var(--text-hi)">${fmt(p?.ask)}</td>

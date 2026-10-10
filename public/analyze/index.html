@@ -122,7 +122,7 @@
 <script src="analyze.js"></script>
 <script>
 Analyze.initHeader();
-const { fmt, fmtM, esc, api } = Analyze;
+const { fmt, fmtM, fmtStrike, esc, api } = Analyze;
 
 const kpisEl = document.getElementById('kpis');
 const ladderEl = document.getElementById('ladder');
@@ -176,7 +176,7 @@ function renderLadder(byStrike, spot, flip) {
   let spotShown = false, flipShown = false;
   for (const r of rows) {
     if (!spotShown && spot != null && r.strike <= spot) { html.push(marker('SPOT ' + fmt(spot), '#F2F0EB')); spotShown = true; }
-    if (!flipShown && flip != null && r.strike <= flip) { html.push(marker('GAMMA FLIP ' + fmt(flip, 0), 'var(--accent)')); flipShown = true; }
+    if (!flipShown && flip != null && r.strike <= flip) { html.push(marker('GAMMA FLIP ' + fmtStrike(flip), 'var(--accent)')); flipShown = true; }
     const callPct = Math.max(1, Math.round(Math.abs(r.callGEX) / maxAbs * 100));
     const putPct = Math.max(1, Math.round(Math.abs(r.putGEX) / maxAbs * 100));
     const isNear = spot != null && Math.abs(r.strike - spot) < 1e-6;
@@ -185,7 +185,7 @@ function renderLadder(byStrike, spot, flip) {
         <span class="mono" style="font-size:11px; color:var(--text-faint)">${Math.abs(r.callGEX) >= 10e6 ? fmtM(r.callGEX) : ''}</span>
         <div style="width:${callPct}%; height:14px; background:var(--call); border-radius:2px 0 0 2px"></div>
       </div>
-      <span class="mono" style="text-align:center; font-size:12px; color:var(--muted-row)">${fmt(r.strike, 0)}</span>
+      <span class="mono" style="text-align:center; font-size:12px; color:var(--muted-row)">${fmtStrike(r.strike)}</span>
       <div style="display:flex; align-items:center; gap:8px; padding-left:4px">
         <div style="width:${putPct}%; height:14px; background:var(--put); border-radius:0 2px 2px 0"></div>
         <span class="mono" style="font-size:11px; color:var(--text-faint)">${Math.abs(r.putGEX) >= 10e6 ? fmtM(r.putGEX) : ''}</span>
@@ -212,7 +212,7 @@ function renderSignal(snap) {
   document.getElementById('signalBias').textContent = bias;
   document.getElementById('signalBias').style.color = color;
   const regimeTxt = positive ? 'dealers are net long gamma and tend to dampen moves' : 'dealers are net short gamma and tend to amplify moves';
-  const flipTxt = snap.flip != null ? (aboveFlip ? `holding above the ${fmt(snap.flip, 0)} flip` : `sitting below the ${fmt(snap.flip, 0)} flip`) : 'flip not computed (no OI)';
+  const flipTxt = snap.flip != null ? (aboveFlip ? `holding above the ${fmtStrike(snap.flip)} flip` : `sitting below the ${fmtStrike(snap.flip)} flip`) : 'flip not computed (no OI)';
   document.getElementById('signalText').textContent = `${flipTxt.charAt(0).toUpperCase() + flipTxt.slice(1)} in a ${snap.regime || 'unknown'}-gamma regime — ${regimeTxt}.`;
   const tags = [
     snap.flip != null ? (aboveFlip ? 'Above flip' : 'Below flip') : null,
@@ -227,7 +227,7 @@ function renderPinRows(snap) {
     ['Gamma pin', fmt(snap.pin, 2)],
     ['Max pain', fmt(snap.maxPain, 2)],
     ['Expected move', '±' + fmt(snap.expectedMove, 0)],
-    ['Range (±1 EM)', snap.expectedMove != null ? `${fmt(snap.price - snap.expectedMove, 0)} – ${fmt(snap.price + snap.expectedMove, 0)}` : '—'],
+    ['Range (±1 EM)', snap.expectedMove != null ? `${fmtStrike(snap.price - snap.expectedMove)} – ${fmtStrike(snap.price + snap.expectedMove)}` : '—'],
   ];
   document.getElementById('pinRows').innerHTML = rows.map(([l, v]) => `<div class="factrow"><span>${esc(l)}</span><span class="v">${esc(v)}</span></div>`).join('');
 }
@@ -251,9 +251,9 @@ function pushLog(snap) {
     <td class="mono" style="color:var(--text-dim)">${esc(l.time)}</td>
     <td style="color:${l.regime === 'Positive' ? 'var(--good)' : 'var(--bad)'}">${esc(l.regime || '—')}</td>
     <td class="mono" style="text-align:right">${fmt(l.spot)}</td>
-    <td class="mono" style="text-align:right; color:var(--text-dim)">${fmt(l.flip, 0)}</td>
-    <td class="mono" style="text-align:right; color:var(--call)">${fmt(l.callWall, 0)}</td>
-    <td class="mono" style="text-align:right; color:var(--put)">${fmt(l.putWall, 0)}</td>
+    <td class="mono" style="text-align:right; color:var(--text-dim)">${fmtStrike(l.flip)}</td>
+    <td class="mono" style="text-align:right; color:var(--call)">${fmtStrike(l.callWall)}</td>
+    <td class="mono" style="text-align:right; color:var(--put)">${fmtStrike(l.putWall)}</td>
   </tr>`).join('');
 }
 
@@ -281,7 +281,7 @@ function renderFlow(flow) {
     kpi('Call premium', fmtMoney(t.callPremium), flowMode === 'aggro' ? `net ${fmtMoney(netCall)}` : '', 'var(--call)'),
     kpi('Put premium', fmtMoney(t.putPremium), flowMode === 'aggro' ? `net ${fmtMoney(netPut)}` : '', 'var(--put)'),
     kpi('Net flow', (net >= 0 ? 'calls ' : 'puts ') + fmtMoney(Math.abs(net)), '', net >= 0 ? 'var(--call)' : 'var(--put)'),
-    kpi('Last print', flow.lastPrint ? `${flow.lastPrint.aggressor.toUpperCase()} ${fmt(flow.lastPrint.strike, 0)}${flow.lastPrint.side === 'CALL' ? 'C' : 'P'} × ${flow.lastPrint.size} @ ${fmt(flow.lastPrint.price, 2)}` : 'none yet', '', flow.lastPrint?.aggressor === 'sell' ? 'var(--put)' : flow.lastPrint?.aggressor === 'buy' ? 'var(--call)' : 'var(--text-hi)'),
+    kpi('Last print', flow.lastPrint ? `${flow.lastPrint.aggressor.toUpperCase()} ${fmtStrike(flow.lastPrint.strike)}${flow.lastPrint.side === 'CALL' ? 'C' : 'P'} × ${flow.lastPrint.size} @ ${fmt(flow.lastPrint.price, 2)}` : 'none yet', '', flow.lastPrint?.aggressor === 'sell' ? 'var(--put)' : flow.lastPrint?.aggressor === 'buy' ? 'var(--call)' : 'var(--text-hi)'),
   ].join('');
 
   const svg = document.getElementById('flowSvg');
@@ -356,11 +356,11 @@ async function refresh() {
 
     kpisEl.innerHTML = [
       kpi('Regime', snap.hasOI ? `${snap.regime === 'Positive' ? '+γ' : '-γ'} ${snap.regime}` : 'No OI', snap.totalGEX != null ? `net ${fmtM(snap.totalGEX)}` : '', snap.regime === 'Positive' ? 'var(--good)' : 'var(--bad)'),
-      kpi('Gamma flip', fmt(snap.flip, 0), snap.flip != null ? `${Math.abs(snap.price - snap.flip).toFixed(0)} pts from spot` : '', 'var(--accent)'),
-      kpi('Put wall', fmt(snap.putWall, 0), '', 'var(--put)'),
-      kpi('Call wall', fmt(snap.callWall, 0), '', 'var(--call)'),
-      kpi('Max pain', fmt(snap.maxPain, 0), '', 'var(--text-hi)'),
-      kpi('Expected move', '±' + fmt(snap.expectedMove, 0), snap.expectedMove != null ? `${fmt(snap.price - snap.expectedMove, 0)} – ${fmt(snap.price + snap.expectedMove, 0)}` : '', 'var(--text-hi)'),
+      kpi('Gamma flip', fmtStrike(snap.flip), snap.flip != null ? `${Math.abs(snap.price - snap.flip).toFixed(0)} pts from spot` : '', 'var(--accent)'),
+      kpi('Put wall', fmtStrike(snap.putWall), '', 'var(--put)'),
+      kpi('Call wall', fmtStrike(snap.callWall), '', 'var(--call)'),
+      kpi('Max pain', fmtStrike(snap.maxPain), '', 'var(--text-hi)'),
+      kpi('Expected move', '±' + fmt(snap.expectedMove, 0), snap.expectedMove != null ? `${fmtStrike(snap.price - snap.expectedMove)} – ${fmtStrike(snap.price + snap.expectedMove)}` : '', 'var(--text-hi)'),
     ].join('');
 
     renderLadder(snap.byStrike, snap.price, snap.flip);

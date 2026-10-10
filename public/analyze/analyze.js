@@ -17,6 +17,16 @@ const Analyze = (() => {
     const sign = n < 0 ? '−' : '';
     return `${sign}$${(Math.abs(n) / 1e6).toFixed(1)}M`;
   }
+  // Strike labels: whole numbers print plain ("578"), but a half-dollar (or
+  // other sub-whole) strike keeps its decimal ("612.5") instead of silently
+  // rounding to a strike that doesn't exist on the chain (612.5 → "613" reads
+  // as a real, different strike with plain fmt(n, 0)).
+  function fmtStrike(n) {
+    if (n === null || n === undefined || Number.isNaN(Number(n))) return '—';
+    const v = Number(n);
+    if (Number.isInteger(v)) return String(v);
+    return v.toFixed(2).replace(/0$/, '').replace(/\.$/, '');
+  }
   function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
   function clockTick(el) {
@@ -128,5 +138,5 @@ const Analyze = (() => {
     return { get symbol() { return symbol; }, reload: loadExpirations };
   }
 
-  return { api, fmt, fmtM, esc, initHeader, wireControls };
+  return { api, fmt, fmtM, fmtStrike, esc, initHeader, wireControls };
 })();
