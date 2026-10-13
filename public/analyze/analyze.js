@@ -45,29 +45,59 @@ const Analyze = (() => {
     if (list.length > RECENT_SYMBOLS_MAX) list = list.slice(0, RECENT_SYMBOLS_MAX);
     try { localStorage.setItem(RECENT_SYMBOLS_KEY, JSON.stringify(list)); } catch { /* storage unavailable — history just won't persist */ }
   }
-  // Fills a <datalist> element with the current recent-symbol options so a
-  // plain <input list="..."> gets native autocomplete. Call renderRecentSymbols()
-  // again any time the list may have changed (e.g. after pushRecentSymbol).
-  function renderRecentSymbols(datalistEl) {
-    if (!datalistEl) return;
-    datalistEl.innerHTML = getRecentSymbols().map(s => `<option value="${esc(s)}">`).join('');
-  }
+  // Custom last-20-tickers suggestion list. A native <datalist> popup can't
+  // be styled or sized — Chrome always sizes it to its widest option rather
+  // than the input (that's also why a plain datalist looked far wider than
+  // the little symbol field), and has a separate quirk where picking an
+  // option doesn't close the popup if the field keeps focus. Drawing the
+  // menu ourselves, anchored under the field and matched to its width,
+  // sidesteps both: wraps inputEl in a small positioned span, shows a menu
+  // of recent symbols on focus (narrowed as you type), and on a click sets
+  // the value and fires a normal 'change' event so the existing symbol
+  // handling in wireControls()/build.js runs unchanged.
+  function attachSymbolHistory(inputEl) {
+    if (!inputEl) return { render() {} };
+    let wrap = inputEl.parentElement;
+    if (!wrap || !wrap.classList.contains('symhist')) {
+      wrap = document.createElement('span');
+      wrap.className = 'symhist';
+      inputEl.replaceWith(wrap);
+      wrap.appendChild(inputEl);
+    }
+    const menu = document.createElement('div');
+    menu.className = 'symhist-menu';
+    menu.hidden = true;
+    wrap.appendChild(menu);
 
-  // Browsers filter <datalist> suggestions to only the ones that match the
-  // text already in the field — with a symbol already typed in (e.g. "AMD"),
-  // that leaves just the one match, hiding the rest of the history. Clearing
-  // the field on focus makes every recent symbol show up as soon as you
-  // click in; if you click away without picking one, the original value is
-  // put back so nothing changes by accident.
-  function enableFullDatalistOnFocus(inputEl) {
-    if (!inputEl) return;
-    inputEl.addEventListener('focus', () => {
-      inputEl.dataset.beforeFocus = inputEl.value;
-      inputEl.value = '';
+    function render(filter = '') {
+      const f = filter.trim().toUpperCase();
+      const list = getRecentSymbols().filter(s => !f || s.includes(f));
+      if (!list.length) { menu.hidden = true; return; }
+      menu.innerHTML = list.map(s => `<div class="symhist-item" data-sym="${esc(s)}">${esc(s)}</div>`).join('');
+      menu.hidden = false;
+    }
+
+    let beforeFocus = '';
+    inputEl.addEventListener('focus', () => { beforeFocus = inputEl.value; render(''); });
+    inputEl.addEventListener('input', () => render(inputEl.value));
+    inputEl.addEventListener('keydown', e => { if (e.key === 'Escape') menu.hidden = true; });
+    // mousedown (not click) fires before the input would blur, and
+    // preventDefault keeps focus on the input instead of moving it to the
+    // menu — so picking a symbol never triggers (or gets stuck behind) a
+    // blur at all.
+    menu.addEventListener('mousedown', e => {
+      const item = e.target.closest('.symhist-item');
+      if (!item) return;
+      e.preventDefault();
+      inputEl.value = item.dataset.sym;
+      menu.hidden = true;
+      inputEl.dispatchEvent(new Event('change', { bubbles: true }));
     });
     inputEl.addEventListener('blur', () => {
-      if (!inputEl.value && inputEl.dataset.beforeFocus) inputEl.value = inputEl.dataset.beforeFocus;
+      menu.hidden = true;
+      if (!inputEl.value && beforeFocus) inputEl.value = beforeFocus;
     });
+    return { render };
   }
 
   function clockTick(el) {
@@ -143,12 +173,11 @@ const Analyze = (() => {
 
   // Shared symbol/expiry controls: loads expirations, keeps them in sync,
   // calls onChange(symbol, expiry) whenever either settles on a usable value.
-  function wireControls({ symbolInput, expirySelect, onChange, defaultSymbol = 'SPX', datalist }) {
+  function wireControls({ symbolInput, expirySelect, onChange, defaultSymbol = 'SPX' }) {
     let symbol = (localStorage.getItem('analyze.symbol') || defaultSymbol).toUpperCase();
     symbolInput.value = symbol;
     pushRecentSymbol(symbol);
-    renderRecentSymbols(datalist);
-    enableFullDatalistOnFocus(symbolInput);
+    attachSymbolHistory(symbolInput);
 
     async function loadExpirations() {
       expirySelect.innerHTML = '<option>Loading…</option>';
@@ -175,7 +204,6 @@ const Analyze = (() => {
       symbol = v;
       localStorage.setItem('analyze.symbol', symbol);
       pushRecentSymbol(symbol);
-      renderRecentSymbols(datalist);
       loadExpirations();
     });
     expirySelect.addEventListener('change', () => onChange(symbol, expirySelect.value));
@@ -184,5 +212,5 @@ const Analyze = (() => {
     return { get symbol() { return symbol; }, reload: loadExpirations };
   }
 
-  return { api, fmt, fmtM, fmtStrike, esc, initHeader, wireControls, getRecentSymbols, pushRecentSymbol, renderRecentSymbols, enableFullDatalistOnFocus };
+  return { api, fmt, fmtM, fmtStrike, esc, initHeader, wireControls, getRecentSymbols, pushRecentSymbol, attachSymbolHistory };
 })();

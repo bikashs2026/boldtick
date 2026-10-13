@@ -733,16 +733,14 @@
   }
 
   // Shared last-20-tickers history (public/analyze/analyze.js) backs the
-  // <datalist> on #symIn too, so a symbol typed on Analyze/Chain shows up
-  // here and vice versa.
+  // suggestion menu on #symIn too, so a symbol typed on Analyze/Chain shows
+  // up here and vice versa. attachSymbolHistory reads localStorage fresh
+  // every time it opens, so there's nothing to re-render after a push.
   function trackRecentSymbol(sym) {
-    if (typeof Analyze !== 'undefined' && Analyze.pushRecentSymbol) {
-      Analyze.pushRecentSymbol(sym);
-      Analyze.renderRecentSymbols(document.getElementById('symbolHistory'));
-    }
+    if (typeof Analyze !== 'undefined' && Analyze.pushRecentSymbol) Analyze.pushRecentSymbol(sym);
   }
 
-  if (typeof Analyze !== 'undefined' && Analyze.enableFullDatalistOnFocus) Analyze.enableFullDatalistOnFocus(document.getElementById('symIn'));
+  if (typeof Analyze !== 'undefined' && Analyze.attachSymbolHistory) Analyze.attachSymbolHistory(document.getElementById('symIn'));
 
   document.getElementById('symIn').addEventListener('change', async e => {
     const v = e.target.value.trim().toUpperCase();

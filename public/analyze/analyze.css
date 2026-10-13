@@ -57,6 +57,21 @@ main { max-width: 1440px; margin: 0 auto; padding: 24px; display: flex; flex-dir
   color: var(--text-hi); font-family: 'IBM Plex Sans', sans-serif; font-size: 14px;
 }
 .field input { width: 96px; font-family: 'JetBrains Mono', monospace; font-size: 15px; font-weight: 600; text-transform: uppercase; }
+
+/* Last-20-tickers suggestion menu (analyze.js attachSymbolHistory) — sized
+   to the symbol field itself rather than a native <datalist>'s auto width. */
+.symhist { position: relative; display: inline-block; align-self: flex-start; }
+.symhist-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 50;
+  min-width: 100%; width: max-content; max-width: 160px; max-height: 240px; overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 4px;
+  box-shadow: 0 10px 28px rgba(0,0,0,.45);
+}
+.symhist-item {
+  padding: 7px 10px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; font-size: 13px;
+  font-weight: 600; color: var(--text-hi); cursor: pointer; white-space: nowrap;
+}
+.symhist-item:hover { background: var(--panel-2); }
 .price { display: flex; align-items: baseline; gap: 12px; }
 .price .last { font-family: 'JetBrains Mono', monospace; font-size: 34px; font-weight: 500; letter-spacing: -0.02em; }
 .price .chg { font-family: 'JetBrains Mono', monospace; font-size: 15px; }
