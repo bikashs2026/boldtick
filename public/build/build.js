@@ -736,13 +736,13 @@
   // <datalist> on #symIn too, so a symbol typed on Analyze/Chain shows up
   // here and vice versa.
   function trackRecentSymbol(sym) {
-    if (window.Analyze && Analyze.pushRecentSymbol) {
+    if (typeof Analyze !== 'undefined' && Analyze.pushRecentSymbol) {
       Analyze.pushRecentSymbol(sym);
       Analyze.renderRecentSymbols(document.getElementById('symbolHistory'));
     }
   }
 
-  if (window.Analyze && Analyze.enableFullDatalistOnFocus) Analyze.enableFullDatalistOnFocus(document.getElementById('symIn'));
+  if (typeof Analyze !== 'undefined' && Analyze.enableFullDatalistOnFocus) Analyze.enableFullDatalistOnFocus(document.getElementById('symIn'));
 
   document.getElementById('symIn').addEventListener('change', async e => {
     const v = e.target.value.trim().toUpperCase();
@@ -758,7 +758,7 @@
 
   // ── boot ──
   (async () => {
-    if (window.Analyze && Analyze.initHeader) Analyze.initHeader();
+    if (typeof Analyze !== 'undefined' && Analyze.initHeader) Analyze.initHeader();
     document.getElementById('symIn').value = symbol;
     trackRecentSymbol(symbol);
     try {
