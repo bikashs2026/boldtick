@@ -229,6 +229,12 @@
     const left = Date.parse(i.expires_at) - Date.parse(S.status?.clock?.now || new Date().toISOString());
     const expiresIn = i.status === 'pending' ? (left > 0 ? `expires in ${Math.ceil(left / 60000)} min` : 'expired') : '';
     const rp = S.reprice[i.id];
+    // The Approve row's Limit field defaults to the current live mid (same
+    // number a refresh just pulled in), not the frozen limit Muse suggested
+    // at creation time — so approving right after a refresh submits at
+    // today's price without having to retype it. Falls back to the original
+    // suggested limit when there's no live quote yet.
+    const approveDefault = c.priced && c.live_mid != null ? roundToTick(i.symbol, c.live_mid) : i.limit_price;
     const facts = [
       ['Limit', `${px(i.limit_price)} ${credit ? 'cr' : 'db'}`],
       ['Live mid / natural', c.priced ? `${px(c.live_mid)} / ${px(c.live_natural)}` : 'unpriced'],
@@ -262,7 +268,7 @@
             <button type="button" class="btn small" data-dismiss-reprice="${i.id}">Back</button>
           </div></div>` : `<div class="approve-row">
           <label>Quantity<input class="num" type="number" min="1" step="1" value="${esc(i.legs[0]?.qty || 1)}" data-qty-for="${i.id}"></label>
-          <label>Limit<input class="num" type="number" min="0.01" step="0.05" value="${esc(i.limit_price)}" data-price-for="${i.id}"></label>
+          <label>Limit<input class="num" type="number" min="0.01" step="0.05" value="${esc(approveDefault)}" data-price-for="${i.id}"></label>
           <button type="button" class="btn good" data-approve="${i.id}">Approve</button>
           <button type="button" class="btn danger" data-reject="${i.id}">Reject</button>
         </div>`) : ''}
