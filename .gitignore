@@ -4,3 +4,6 @@ data/
 *.tmp
 .DS_Store
 npm-debug.log*
+
+*.bundle
+old-tests/
