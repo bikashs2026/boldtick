@@ -742,6 +742,8 @@
     }
   }
 
+  if (window.Analyze && Analyze.enableFullDatalistOnFocus) Analyze.enableFullDatalistOnFocus(document.getElementById('symIn'));
+
   document.getElementById('symIn').addEventListener('change', async e => {
     const v = e.target.value.trim().toUpperCase();
     if (!v) { e.target.value = symbol; return; }

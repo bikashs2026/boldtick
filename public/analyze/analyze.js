@@ -53,6 +53,23 @@ const Analyze = (() => {
     datalistEl.innerHTML = getRecentSymbols().map(s => `<option value="${esc(s)}">`).join('');
   }
 
+  // Browsers filter <datalist> suggestions to only the ones that match the
+  // text already in the field — with a symbol already typed in (e.g. "AMD"),
+  // that leaves just the one match, hiding the rest of the history. Clearing
+  // the field on focus makes every recent symbol show up as soon as you
+  // click in; if you click away without picking one, the original value is
+  // put back so nothing changes by accident.
+  function enableFullDatalistOnFocus(inputEl) {
+    if (!inputEl) return;
+    inputEl.addEventListener('focus', () => {
+      inputEl.dataset.beforeFocus = inputEl.value;
+      inputEl.value = '';
+    });
+    inputEl.addEventListener('blur', () => {
+      if (!inputEl.value && inputEl.dataset.beforeFocus) inputEl.value = inputEl.dataset.beforeFocus;
+    });
+  }
+
   function clockTick(el) {
     const tick = () => { el.textContent = new Date().toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false }) + ' ET'; };
     tick(); setInterval(tick, 1000);
@@ -131,6 +148,7 @@ const Analyze = (() => {
     symbolInput.value = symbol;
     pushRecentSymbol(symbol);
     renderRecentSymbols(datalist);
+    enableFullDatalistOnFocus(symbolInput);
 
     async function loadExpirations() {
       expirySelect.innerHTML = '<option>Loading…</option>';
@@ -166,5 +184,5 @@ const Analyze = (() => {
     return { get symbol() { return symbol; }, reload: loadExpirations };
   }
 
-  return { api, fmt, fmtM, fmtStrike, esc, initHeader, wireControls, getRecentSymbols, pushRecentSymbol, renderRecentSymbols };
+  return { api, fmt, fmtM, fmtStrike, esc, initHeader, wireControls, getRecentSymbols, pushRecentSymbol, renderRecentSymbols, enableFullDatalistOnFocus };
 })();

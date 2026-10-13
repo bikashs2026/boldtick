@@ -1,0 +1,15 @@
+{
+  "name": "boldtick-tastytrade-test",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone test of the tastytrade API — not wired into TradeForge. Exchanges a refresh token for an access token, pulls a live SPX option chain, and opens a DXLink stream for a few quotes.",
+  "scripts": {
+    "test": "node test-tasty.mjs"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "ws": "^8.18.0"
+  }
+}
