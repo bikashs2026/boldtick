@@ -13,7 +13,7 @@ function newId(prefix, nowMs = Date.now()) {
 }
 
 const EVENT_TYPES = new Set([
-  'idea.created', 'idea.invalid', 'idea.approved', 'idea.rejected', 'idea.expired',
+  'idea.created', 'idea.invalid', 'idea.approved', 'idea.rejected', 'idea.expired', 'idea.repriced',
   'order.submitted', 'order.filled', 'order.partially_filled', 'order.cancelled', 'order.rejected',
   'position.opened', 'signal.raised', 'position.closed', 'reconcile.mismatch',
   'settings.changed', 'kill_switch.changed',
