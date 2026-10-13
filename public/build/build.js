@@ -659,6 +659,7 @@
 
   async function loadTemplate(t) {
     symbol = t.symbol; document.getElementById('symIn').value = symbol;
+    trackRecentSymbol(symbol);
     await loadExpirations();
     structure = t.structure; document.getElementById('tplSel').value = structure;
     codOverride = t.credit_or_debit || 'credit'; document.getElementById('codSel').value = codOverride;
@@ -671,6 +672,7 @@
 
   async function loadDraft(d) {
     symbol = d.symbol; document.getElementById('symIn').value = symbol;
+    trackRecentSymbol(symbol);
     await loadExpirations();
     if (expirationsList.includes(d.expiry)) frontExpiry = d.expiry;
     structure = d.structure; document.getElementById('tplSel').value = structure;
@@ -730,10 +732,21 @@
     schedulePrice();
   }
 
+  // Shared last-20-tickers history (public/analyze/analyze.js) backs the
+  // <datalist> on #symIn too, so a symbol typed on Analyze/Chain shows up
+  // here and vice versa.
+  function trackRecentSymbol(sym) {
+    if (window.Analyze && Analyze.pushRecentSymbol) {
+      Analyze.pushRecentSymbol(sym);
+      Analyze.renderRecentSymbols(document.getElementById('symbolHistory'));
+    }
+  }
+
   document.getElementById('symIn').addEventListener('change', async e => {
     const v = e.target.value.trim().toUpperCase();
     if (!v) { e.target.value = symbol; return; }
     symbol = v; localStorage.setItem('build.symbol', symbol);
+    trackRecentSymbol(symbol);
     await loadExpirations();
     legs = await defaultLegsFor(structure);
     renderLegs(); schedulePrice();
@@ -745,6 +758,7 @@
   (async () => {
     if (window.Analyze && Analyze.initHeader) Analyze.initHeader();
     document.getElementById('symIn').value = symbol;
+    trackRecentSymbol(symbol);
     try {
       await loadExpirations();
       legs = await defaultLegsFor(structure);

@@ -33,7 +33,8 @@
 <main>
   <div class="controls">
     <div style="display:flex; flex-wrap:wrap; gap:8px">
-      <label class="field">Symbol<input id="symbol" aria-label="Symbol" autocomplete="off"></label>
+      <label class="field">Symbol<input id="symbol" aria-label="Symbol" autocomplete="off" list="symbolHistory"></label>
+      <datalist id="symbolHistory"></datalist>
       <label class="field">Expiry<select id="expiry" aria-label="Expiry"></select></label>
       <label class="field">Strikes<select id="width" aria-label="Strike width">
         <option value="10">±10 around spot</option>
@@ -233,6 +234,7 @@ document.getElementById('width').addEventListener('change', refresh);
 Analyze.wireControls({
   symbolInput: document.getElementById('symbol'),
   expirySelect: document.getElementById('expiry'),
+  datalist: document.getElementById('symbolHistory'),
   onChange(symbol, expiry, err) {
     current = { symbol, expiry };
     picked = null;

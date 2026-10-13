@@ -201,6 +201,12 @@
     } else if (b.dataset.dismissReprice) {
       delete S.reprice[b.dataset.dismissReprice];
       loadIdeas();
+    } else if (b.dataset.refreshIdea) {
+      const id = b.dataset.refreshIdea;
+      b.disabled = true;
+      b.classList.add('spinning');
+      try { await api('POST', `/trade-ideas/${id}/reprice`); loadIdeas(); }
+      catch (e) { toast(errText(e), true); b.disabled = false; b.classList.remove('spinning'); }
     }
   });
 
@@ -243,7 +249,7 @@
         <span class="status-tag ${esc(i.status)}">${esc(i.status)}</span>
       </div>
       <div class="legs">${legsHtml(i.legs)}</div>
-      <div class="facts">${facts.map(([k, v]) => `<div><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`).join('')}</div>
+      <div class="facts">${facts.map(([k, v]) => `<div><span class="k">${k}</span><span class="v">${esc(v)}${k === 'Live mid / natural' && i.status === 'pending' && !i.expired ? `<button type="button" class="btn icon" data-refresh-idea="${i.id}" title="Refresh live price" aria-label="Refresh live price">⟳</button>` : ''}</span></div>`).join('')}</div>
       <p class="thesis">${esc(i.thesis)}</p>
       ${i.earnings_date ? `<span class="flag warn">earnings ${esc(i.earnings_date)}</span>` : ''}
       ${i.validation?.errors?.length ? `<ul class="issues err">${i.validation.errors.map(e => `<li>${esc(e.issue)}</li>`).join('')}</ul>` : ''}

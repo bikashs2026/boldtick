@@ -90,7 +90,10 @@ table.grid tr.urgent td { background: rgba(235, 106, 106, .05); }
 .facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 16px; }
 .facts div { display: flex; flex-direction: column; gap: 2px; }
 .facts .k { font-size: 11.5px; color: var(--muted); }
-.facts .v { font: 500 14px var(--mono); }
+.facts .v { font: 500 14px var(--mono); display: flex; align-items: center; gap: 6px; }
+.btn.icon { padding: 0; width: 22px; height: 22px; min-height: 0; line-height: 1; border-radius: 5px; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.btn.icon.spinning { animation: spin .7s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 .thesis { color: var(--text); line-height: 1.5; margin: 0; white-space: pre-wrap; }
 .issues { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.5; }
 .issues.warn { color: var(--warn); } .issues.err { color: var(--bad); }

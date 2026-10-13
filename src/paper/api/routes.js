@@ -76,6 +76,7 @@ function makeRouter({ desk, settings, events, store, auth, market, clock }) {
     return { __status: 202, body: { idea_id: out.idea.id, order_id: out.order.id, status: out.order.status, idea: out.idea, order: out.order } };
   }));
   r.post('/trade-ideas/:id/reject', ownerOnly, h(req => desk.reject(req.params.id, req.body || {}, req.caller.user)));
+  r.post('/trade-ideas/:id/reprice', ownerOnly, h(req => desk.reprice(req.params.id)));
 
   // ── Orders ──
   r.get('/orders', h(req => desk.listOrders({ status: req.query.status })));

@@ -29,6 +29,30 @@ const Analyze = (() => {
   }
   function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
+  // Shared "last 20 tickers" history, used by every symbol input across
+  // Analyze (GEX, Chain) and Build so typing a symbol anywhere adds to one
+  // common recent list. Most-recently-used first; de-duped.
+  const RECENT_SYMBOLS_KEY = 'recentSymbols';
+  const RECENT_SYMBOLS_MAX = 20;
+  function getRecentSymbols() {
+    try { return JSON.parse(localStorage.getItem(RECENT_SYMBOLS_KEY) || '[]'); } catch { return []; }
+  }
+  function pushRecentSymbol(sym) {
+    sym = String(sym || '').trim().toUpperCase();
+    if (!sym) return;
+    let list = getRecentSymbols().filter(s => s !== sym);
+    list.unshift(sym);
+    if (list.length > RECENT_SYMBOLS_MAX) list = list.slice(0, RECENT_SYMBOLS_MAX);
+    try { localStorage.setItem(RECENT_SYMBOLS_KEY, JSON.stringify(list)); } catch { /* storage unavailable — history just won't persist */ }
+  }
+  // Fills a <datalist> element with the current recent-symbol options so a
+  // plain <input list="..."> gets native autocomplete. Call renderRecentSymbols()
+  // again any time the list may have changed (e.g. after pushRecentSymbol).
+  function renderRecentSymbols(datalistEl) {
+    if (!datalistEl) return;
+    datalistEl.innerHTML = getRecentSymbols().map(s => `<option value="${esc(s)}">`).join('');
+  }
+
   function clockTick(el) {
     const tick = () => { el.textContent = new Date().toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour12: false }) + ' ET'; };
     tick(); setInterval(tick, 1000);
@@ -102,9 +126,11 @@ const Analyze = (() => {
 
   // Shared symbol/expiry controls: loads expirations, keeps them in sync,
   // calls onChange(symbol, expiry) whenever either settles on a usable value.
-  function wireControls({ symbolInput, expirySelect, onChange, defaultSymbol = 'SPX' }) {
+  function wireControls({ symbolInput, expirySelect, onChange, defaultSymbol = 'SPX', datalist }) {
     let symbol = (localStorage.getItem('analyze.symbol') || defaultSymbol).toUpperCase();
     symbolInput.value = symbol;
+    pushRecentSymbol(symbol);
+    renderRecentSymbols(datalist);
 
     async function loadExpirations() {
       expirySelect.innerHTML = '<option>Loading…</option>';
@@ -130,6 +156,8 @@ const Analyze = (() => {
       if (!v || v === symbol) { symbolInput.value = symbol; return; }
       symbol = v;
       localStorage.setItem('analyze.symbol', symbol);
+      pushRecentSymbol(symbol);
+      renderRecentSymbols(datalist);
       loadExpirations();
     });
     expirySelect.addEventListener('change', () => onChange(symbol, expirySelect.value));
@@ -138,5 +166,5 @@ const Analyze = (() => {
     return { get symbol() { return symbol; }, reload: loadExpirations };
   }
 
-  return { api, fmt, fmtM, fmtStrike, esc, initHeader, wireControls };
+  return { api, fmt, fmtM, fmtStrike, esc, initHeader, wireControls, getRecentSymbols, pushRecentSymbol, renderRecentSymbols };
 })();

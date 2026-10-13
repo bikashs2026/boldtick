@@ -135,6 +135,26 @@ class PaperDesk {
     return v;
   }
 
+  // Re-runs live pricing for a pending idea and stores the fresh snapshot
+  // over the frozen one from creation time, so the next GET (and this
+  // response) both show current numbers. Read-only otherwise: no limit
+  // checks block it, it doesn't touch status/expiry/history — just the
+  // priced fields the card displays (limit vs live mid/natural, etc).
+  reprice(id) {
+    return this.run(async () => {
+      const idea = this._idea(id);
+      if (idea.status !== 'pending') throw new DeskError(409, 'invalid_state', `Idea is ${idea.status}, not pending.`);
+      const v = await validateIdea(idea.request, {
+        settings: this.settings, clock: this.clock, market: this.market, stage: 'create',
+        portfolio: await this.portfolio(),
+      });
+      idea.validation = { ok: !v.errors.length, errors: v.errors, warnings: v.warnings, computed: v.computed };
+      this.save('ideas');
+      this.events.emit('idea.repriced', { idea_id: idea.id });
+      return this.viewIdea(idea);
+    });
+  }
+
   reject(id, body = {}, by = 'owner') {
     return this.run(async () => {
       const idea = this._idea(id);
