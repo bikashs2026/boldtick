@@ -17,6 +17,14 @@ const Analyze = (() => {
     const sign = n < 0 ? '−' : '';
     return `${sign}$${(Math.abs(n) / 1e6).toFixed(1)}M`;
   }
+  // Like fmtM, but switches to billions once the magnitude passes $1B —
+  // "$8208.1M" reads worse than "$8.2B" once GEX gets into 10-figure territory.
+  function fmtMB(n) {
+    if (n === null || n === undefined || Number.isNaN(Number(n))) return '—';
+    const sign = n < 0 ? '−' : '';
+    const abs = Math.abs(n);
+    return abs >= 1e9 ? `${sign}$${(abs / 1e9).toFixed(2)}B` : `${sign}$${(abs / 1e6).toFixed(1)}M`;
+  }
   // Strike labels: whole numbers print plain ("578"), but a half-dollar (or
   // other sub-whole) strike keeps its decimal ("612.5") instead of silently
   // rounding to a strike that doesn't exist on the chain (612.5 → "613" reads
@@ -212,5 +220,5 @@ const Analyze = (() => {
     return { get symbol() { return symbol; }, reload: loadExpirations };
   }
 
-  return { api, fmt, fmtM, fmtStrike, esc, initHeader, wireControls, getRecentSymbols, pushRecentSymbol, attachSymbolHistory };
+  return { api, fmt, fmtM, fmtMB, fmtStrike, esc, initHeader, wireControls, getRecentSymbols, pushRecentSymbol, attachSymbolHistory };
 })();

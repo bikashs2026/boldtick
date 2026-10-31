@@ -122,7 +122,7 @@
 <script src="analyze.js"></script>
 <script>
 Analyze.initHeader();
-const { fmt, fmtM, fmtStrike, esc, api } = Analyze;
+const { fmt, fmtM, fmtMB, fmtStrike, esc, api } = Analyze;
 
 const kpisEl = document.getElementById('kpis');
 const ladderEl = document.getElementById('ladder');
@@ -138,8 +138,9 @@ const LADDER_STRIKE_COUNT = 25; // default window: nearest N strikes on each sid
 let ladderExpanded = false;
 let lastLadder = null; // { byStrike, spot, flip }
 
-function kpi(label, value, sub, color) {
-  return `<div class="kpi"><span class="label">${esc(label)}</span><span class="value" style="color:${color || 'var(--text-hi)'}">${esc(value)}</span><span class="sub">${esc(sub)}</span></div>`;
+function kpi(label, value, sub, color, subColor) {
+  const subStyle = subColor ? `color:${subColor}; font-size:14px; font-weight:600` : '';
+  return `<div class="kpi"><span class="label">${esc(label)}</span><span class="value" style="color:${color || 'var(--text-hi)'}">${esc(value)}</span><span class="sub" style="${subStyle}">${esc(sub)}</span></div>`;
 }
 
 function renderError(msg) {
@@ -355,7 +356,7 @@ async function refresh() {
     dataLabel.textContent = `tastytrade · ${snap.dte}DTE`;
 
     kpisEl.innerHTML = [
-      kpi('Regime', snap.hasOI ? `${snap.regime === 'Positive' ? '+γ' : '-γ'} ${snap.regime}` : 'No OI', snap.totalGEX != null ? `net ${fmtM(snap.totalGEX)}` : '', snap.regime === 'Positive' ? 'var(--good)' : 'var(--bad)'),
+      kpi('Regime', snap.hasOI ? `${snap.regime === 'Positive' ? '+γ' : '-γ'} ${snap.regime}` : 'No OI', snap.totalGEX != null ? `net ${fmtMB(snap.totalGEX)}` : '', snap.regime === 'Positive' ? 'var(--good)' : 'var(--bad)', snap.hasOI ? (snap.regime === 'Positive' ? 'var(--good)' : 'var(--bad)') : null),
       kpi('Gamma flip', fmtStrike(snap.flip), snap.flip != null ? `${Math.abs(snap.price - snap.flip).toFixed(0)} pts from spot` : '', 'var(--accent)'),
       kpi('Put wall', fmtStrike(snap.putWall), '', 'var(--put)'),
       kpi('Call wall', fmtStrike(snap.callWall), '', 'var(--call)'),

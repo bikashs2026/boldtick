@@ -132,11 +132,11 @@ function renderChain(rows, spotPx) {
     picked = rows.reduce((best, r) => Math.abs(r.strike - spotPx) < Math.abs(best - spotPx) ? r.strike : best, rows[0]?.strike ?? null);
   }
   const maxOi = Math.max(1, ...rows.map(r => Math.max(r.call?.oi || 0, r.put?.oi || 0)));
-  const sorted = [...rows].sort((a, b) => b.strike - a.strike);
+  const sorted = [...rows].sort((a, b) => a.strike - b.strike);
   const html = [];
   let spotShown = false;
   for (const r of sorted) {
-    if (!spotShown && spotPx != null && r.strike <= spotPx) {
+    if (!spotShown && spotPx != null && r.strike >= spotPx) {
       html.push(`<tr><td colspan="15" style="padding:0"><div style="display:flex; align-items:center; gap:10px; height:22px; padding:0 12px">
         <div style="flex-grow:1; border-top:1px dashed var(--text-hi); opacity:0.6"></div>
         <span style="font-size:11px; font-weight:600; color:var(--text-hi)">SPOT ${fmt(spotPx)}</span>
@@ -145,8 +145,8 @@ function renderChain(rows, spotPx) {
       spotShown = true;
     }
     const c = r.call, p = r.put;
-    const callItm = spotPx != null && r.strike < spotPx ? 'background:rgba(90,169,255,0.06)' : '';
-    const putItm = spotPx != null && r.strike > spotPx ? 'background:rgba(240,138,75,0.06)' : '';
+    const callItm = spotPx != null && r.strike < spotPx ? 'background:rgba(90,169,255,0.18)' : '';
+    const putItm = spotPx != null && r.strike > spotPx ? 'background:rgba(240,138,75,0.18)' : '';
     const isPicked = r.strike === picked;
     html.push(`<tr style="${isPicked ? 'background:#1C1D21' : ''}">
       <td style="text-align:right; height:30px; ${callItm}"><div style="display:flex; justify-content:flex-end; align-items:center; gap:6px">
