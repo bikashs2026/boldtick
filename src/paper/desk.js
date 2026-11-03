@@ -754,6 +754,7 @@ class PaperDesk {
       fill_model: this.settings.value('fills.model'),
       mirror: this.broker.mirrorStatus ? this.broker.mirrorStatus() : null,
       market_data: this.market.name,
+      market_stream: this.market.hub && this.market.hub.status ? this.market.hub.status() : null,
       kill_switch: { on: this.killOn(), forced_by_env: this.killEnv, ...(this.state.kill || {}) },
       clock: { now: this.nowIso(), et: `${et.date} ${et.hm}`, market_open: this.clock.isMarketHours(), simulated: this.clock.simulated },
       last_sync: this.status_.last_sync,
